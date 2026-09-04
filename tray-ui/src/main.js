@@ -1,15 +1,22 @@
 'use strict';
 
 const path = require('node:path');
-const { app, Tray, Menu, BrowserWindow, ipcMain, Notification, nativeImage, shell } = require('electron');
+const fs = require('node:fs');
+const { pathToFileURL } = require('node:url');
+const { app, Tray, Menu, BrowserWindow, ipcMain, Notification, nativeImage, shell, dialog } = require('electron');
 const { PipeClient, IpcMessageType } = require('./ipc/pipeClient');
 const { Store } = require('./store');
 
 const ASSETS_DIR = path.join(__dirname, '..', 'assets');
+const TRAY_ICON_PATHS = {
+  idle: path.join(ASSETS_DIR, 'tray-idle.ico'),
+  active: path.join(ASSETS_DIR, 'tray-active.ico'),
+  block: path.join(ASSETS_DIR, 'tray-block.ico'),
+};
 const TRAY_ICONS = {
-  idle: nativeImage.createFromPath(path.join(ASSETS_DIR, 'tray-idle.ico')),
-  active: nativeImage.createFromPath(path.join(ASSETS_DIR, 'tray-active.ico')),
-  block: nativeImage.createFromPath(path.join(ASSETS_DIR, 'tray-block.ico')),
+  idle: nativeImage.createFromPath(TRAY_ICON_PATHS.idle),
+  active: nativeImage.createFromPath(TRAY_ICON_PATHS.active),
+  block: nativeImage.createFromPath(TRAY_ICON_PATHS.block),
 };
 
 let tray = null;
@@ -17,6 +24,9 @@ let mainWindow = null;
 let pipeClient = null;
 let store = null;
 let revertTimer = null;
+let currentTrayState = 'idle';
+let unseenBlockCount = 0;
+const badgeIconCache = new Map();
 
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu-sandbox');
@@ -52,20 +62,66 @@ function createTray() {
 }
 
 function setTrayState(state) {
-  const icon = TRAY_ICONS[state] ?? TRAY_ICONS.idle;
-  tray.setImage(icon);
+  currentTrayState = state;
   tray.setToolTip(
-    state === 'active' ? 'AntiGrabber — protegendo' :
+    (state === 'active' ? 'AntiGrabber — protegendo' :
     state === 'block' ? 'AntiGrabber — bloqueio recente' :
-    'AntiGrabber — ocioso'
+    'AntiGrabber — ocioso') +
+    (unseenBlockCount > 0 ? ` (${unseenBlockCount} não vistos)` : '')
   );
+  refreshTrayIcon();
+}
+
+// ponytail: composed via offscreen render (no image lib dependency); caps at "9+" and caches per state+count.
+async function getBadgedTrayIcon(state, count) {
+  const baseIcon = TRAY_ICONS[state] ?? TRAY_ICONS.idle;
+  if (!count) return baseIcon;
+
+  const label = count > 9 ? '9+' : String(count);
+  const cacheKey = `${state}:${label}`;
+  if (badgeIconCache.has(cacheKey)) return badgeIconCache.get(cacheKey);
+
+  const fileUrl = pathToFileURL(TRAY_ICON_PATHS[state] ?? TRAY_ICON_PATHS.idle).href;
+  const html = `data:text/html;charset=utf-8,${encodeURIComponent(`
+    <html><body style="margin:0;width:32px;height:32px;background:transparent;overflow:hidden">
+      <img src="${fileUrl}" width="32" height="32" style="display:block;position:absolute;top:0;left:0" />
+      <svg width="32" height="32" style="position:absolute;top:0;left:0">
+        <circle cx="24" cy="9" r="8" fill="#d63a3a" stroke="white" stroke-width="1.5"/>
+        <text x="24" y="12.5" font-family="Segoe UI, sans-serif" font-size="9" font-weight="700" fill="white" text-anchor="middle">${label}</text>
+      </svg>
+    </body></html>`)}`;
+
+  const offscreen = new BrowserWindow({
+    show: false,
+    width: 32,
+    height: 32,
+    frame: false,
+    transparent: true,
+    webPreferences: { offscreen: true },
+  });
+
+  try {
+    await offscreen.loadURL(html);
+    const image = await offscreen.webContents.capturePage();
+    badgeIconCache.set(cacheKey, image);
+    return image;
+  } catch {
+    return baseIcon;
+  } finally {
+    offscreen.destroy();
+  }
+}
+
+async function refreshTrayIcon() {
+  const icon = await getBadgedTrayIcon(currentTrayState, unseenBlockCount);
+  if (tray) tray.setImage(icon);
 }
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 440,
-    height: 640,
-    minWidth: 380,
+    width: 920,
+    height: 600,
+    minWidth: 760,
     minHeight: 460,
     show: false,
     frame: false,
@@ -87,7 +143,6 @@ function createWindow() {
   });
 
   if (process.env.AG_DEBUG_SHOW) {
-    const fs = require('node:fs');
     const dbgLog = (line) => fs.appendFileSync(path.join(require('node:os').tmpdir(), 'ag-debug.log'), line + '\n');
     mainWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
       dbgLog(`[renderer:${level}] ${message} (${sourceId}:${line})`);
@@ -108,6 +163,10 @@ function showWindow() {
   if (!mainWindow) return;
   mainWindow.show();
   mainWindow.focus();
+  if (unseenBlockCount > 0) {
+    unseenBlockCount = 0;
+    refreshTrayIcon();
+  }
 }
 
 function connectToService() {
@@ -129,11 +188,17 @@ function connectToService() {
         setTrayState(envelope.status?.state === 'recentBlock' ? 'block' : 'active');
         break;
 
+      case IpcMessageType.RulesSnapshot:
+        send('rules-snapshot', envelope.rulesSnapshot?.rules ?? []);
+        break;
+
       case IpcMessageType.BlockEvent: {
         const stored = store.addEvent(envelope.blockEvent);
         send('block-event', stored);
+        if (!mainWindow || !mainWindow.isVisible()) unseenBlockCount++;
         setTrayState('block');
-        if (store.getSettings().notificationsEnabled) showBlockNotification(stored);
+        const settings = store.getSettings();
+        if (settings.notificationsEnabled && !store.notificationsSnoozed()) showBlockNotification(stored);
         scheduleRevertToActive();
         break;
       }
@@ -150,10 +215,23 @@ function scheduleRevertToActive() {
 
 function showBlockNotification(ev) {
   if (!ev) return;
-  new Notification({
+  const detailLines = [
+    `Programa: ${ev.processName}`,
+    `Domínio: ${ev.domain}`,
+    ev.correlatedFileAccess ? 'Acesso a arquivo sensível detectado logo antes' : null,
+  ].filter(Boolean);
+
+  const notification = new Notification({
     title: 'AntiGrabber bloqueou uma tentativa',
-    body: ev.plainLanguageMessage || `Bloqueamos uma conexão de ${ev.processName} para ${ev.domain}.`,
-  }).show();
+    body: (ev.plainLanguageMessage || `Bloqueamos uma conexão de ${ev.processName} para ${ev.domain}.`) +
+      '\n' + detailLines.join(' · '),
+    icon: TRAY_ICONS.block,
+  });
+  notification.on('click', () => {
+    showWindow();
+    send('open-event-detail', ev.id);
+  });
+  notification.show();
 }
 
 function send(channel, payload) {
@@ -169,9 +247,24 @@ ipcMain.handle('allow-always', async (_event, { domain, processName }) => {
   }) ?? false;
 });
 
+ipcMain.handle('remove-rule', async (_event, { domain, processName }) => {
+  return pipeClient?.send({
+    type: IpcMessageType.RemoveRuleCommand,
+    removeRule: { domain, processName },
+  }) ?? false;
+});
+
+ipcMain.handle('set-rule-enabled', async (_event, { domain, processName, enabled }) => {
+  return pipeClient?.send({
+    type: IpcMessageType.SetRuleEnabledCommand,
+    setRuleEnabled: { domain, processName, enabled },
+  }) ?? false;
+});
+
 ipcMain.handle('is-connected', () => pipeClient?.connected ?? false);
 
 ipcMain.handle('get-events', (_e, query) => store.queryEvents(query));
+ipcMain.handle('get-event', (_e, id) => store.getEvent(id));
 ipcMain.handle('clear-history', () => { store.clearEvents(); return true; });
 ipcMain.handle('get-settings', () => store.getSettings());
 ipcMain.handle('update-settings', (_e, partial) => store.updateSettings(partial));
@@ -180,6 +273,33 @@ ipcMain.handle('open-logs-folder', () => {
   const logsDir = path.join(process.env.ProgramData || 'C:\\ProgramData', 'AntiGrabber', 'logs');
   return shell.openPath(logsDir);
 });
+
+ipcMain.handle('export-history', async () => {
+  const events = store.getAllEvents();
+  if (!events.length) return { ok: false, reason: 'empty' };
+
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    title: 'Exportar histórico de bloqueios',
+    defaultPath: `antigrabber-historico-${new Date().toISOString().slice(0, 10)}.json`,
+    filters: [
+      { name: 'JSON', extensions: ['json'] },
+      { name: 'CSV', extensions: ['csv'] },
+    ],
+  });
+  if (canceled || !filePath) return { ok: false, reason: 'canceled' };
+
+  const content = filePath.toLowerCase().endsWith('.csv') ? eventsToCsv(events) : JSON.stringify(events, null, 2);
+  fs.writeFileSync(filePath, content, 'utf8');
+  return { ok: true, filePath };
+});
+
+function eventsToCsv(events) {
+  const cols = ['timestamp', 'processName', 'domain', 'correlatedFileAccess', 'correlatedFilePath', 'pid', 'localPort', 'plainLanguageMessage'];
+  const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const rows = [cols.join(',')];
+  for (const ev of events) rows.push(cols.map((c) => escape(ev[c])).join(','));
+  return rows.join('\r\n');
+}
 
 ipcMain.on('window-minimize', () => mainWindow?.hide());
 ipcMain.on('window-close', () => mainWindow?.hide());

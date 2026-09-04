@@ -7,22 +7,30 @@ function app() {
     blocksLast24h: 0,
     monitoredApps: [],
 
+    tab: 'feed',
+
     events: [],
     page: 1,
     pageSize: 20,
     total: 0,
     totalPages: 1,
     loading: false,
-    allowedIds: new Set(),
+
+    rules: [],
+    newRuleDomain: '',
+    newRuleProcess: '',
 
     search: '',
     correlatedOnly: false,
     sinceDays: '',
-    filterOpen: false,
 
     notificationsEnabled: true,
     persistHistory: true,
-    settingsOpen: false,
+    notificationsSnoozedUntil: null,
+    snoozeTick: 0,
+
+    detailEvent: null,
+    exportFeedback: '',
 
     init() {
       window.antigrabber.onConnectionStatus(({ connected }) => {
@@ -38,13 +46,25 @@ function app() {
       });
 
       window.antigrabber.onBlockEvent(() => {
-        if (this.page === 1) this.loadFeed();
+        if (this.page === 1 && this.tab === 'feed') this.loadFeed();
+      });
+
+      window.antigrabber.onOpenEventDetail((id) => {
+        this.tab = 'feed';
+        this.openDetailById(id);
+      });
+
+      window.antigrabber.onRulesSnapshot((rules) => {
+        this.rules = rules;
       });
 
       window.antigrabber.getSettings().then((s) => {
         this.notificationsEnabled = s.notificationsEnabled;
         this.persistHistory = s.persistHistory;
+        this.notificationsSnoozedUntil = s.notificationsSnoozedUntil ?? null;
       });
+
+      setInterval(() => { this.snoozeTick++; }, 30000);
 
       this.loadFeed();
     },
@@ -76,10 +96,41 @@ function app() {
       this.loading = false;
     },
 
+    isAllowed(domain, processName) {
+      return this.rules.some((r) =>
+        r.enabled &&
+        r.domain.toLowerCase() === (domain || '').toLowerCase() &&
+        r.processName.toLowerCase() === (processName || '').toLowerCase());
+    },
+
     async allow(ev) {
-      this.allowedIds.add(ev.id);
-      this.allowedIds = new Set(this.allowedIds);
       await window.antigrabber.allowAlways(ev.domain, ev.processName);
+    },
+
+    async addRule() {
+      const domain = this.newRuleDomain.trim();
+      const processName = this.newRuleProcess.trim();
+      if (!domain || !processName) return;
+      await window.antigrabber.allowAlways(domain, processName);
+      this.newRuleDomain = '';
+      this.newRuleProcess = '';
+    },
+
+    async toggleRule(rule) {
+      await window.antigrabber.setRuleEnabled(rule.domain, rule.processName, !rule.enabled);
+    },
+
+    async revokeRule(rule) {
+      await window.antigrabber.removeRule(rule.domain, rule.processName);
+    },
+
+    openDetail(ev) {
+      this.detailEvent = ev;
+    },
+
+    async openDetailById(id) {
+      const ev = this.events.find((e) => e.id === id) || await window.antigrabber.getEvent(id);
+      if (ev) this.detailEvent = ev;
     },
 
     async saveSettings() {
@@ -87,6 +138,35 @@ function app() {
         notificationsEnabled: this.notificationsEnabled,
         persistHistory: this.persistHistory,
       });
+    },
+
+    snoozeActive() {
+      this.snoozeTick;
+      if (!this.notificationsSnoozedUntil) return false;
+      if (this.notificationsSnoozedUntil === 'indefinite') return true;
+      return Date.now() < this.notificationsSnoozedUntil;
+    },
+
+    snoozeLabel() {
+      if (this.notificationsSnoozedUntil === 'indefinite') return 'até você reativar';
+      const mins = Math.max(0, Math.round((this.notificationsSnoozedUntil - Date.now()) / 60000));
+      if (mins < 60) return `${mins} min restantes`;
+      return `${Math.round(mins / 60)}h restantes`;
+    },
+
+    async snoozeFor(minutes) {
+      this.notificationsSnoozedUntil = Date.now() + minutes * 60000;
+      await window.antigrabber.updateSettings({ notificationsSnoozedUntil: this.notificationsSnoozedUntil });
+    },
+
+    async snoozeIndefinite() {
+      this.notificationsSnoozedUntil = 'indefinite';
+      await window.antigrabber.updateSettings({ notificationsSnoozedUntil: 'indefinite' });
+    },
+
+    async clearSnooze() {
+      this.notificationsSnoozedUntil = null;
+      await window.antigrabber.updateSettings({ notificationsSnoozedUntil: null });
     },
 
     async clearHistory() {
@@ -99,8 +179,35 @@ function app() {
       window.antigrabber.openLogsFolder();
     },
 
+    async exportHistory() {
+      const result = await window.antigrabber.exportHistory();
+      if (result.ok) {
+        this.exportFeedback = 'Exportado com sucesso.';
+      } else if (result.reason === 'empty') {
+        this.exportFeedback = 'Nenhum bloqueio pra exportar ainda.';
+      } else {
+        this.exportFeedback = '';
+        return;
+      }
+      setTimeout(() => { this.exportFeedback = ''; }, 4000);
+    },
+
     formatTime(iso) {
       return new Date(iso).toLocaleString('pt-BR');
+    },
+
+    formatRowTime(iso) {
+      const d = new Date(iso);
+      const sameDay = d.toDateString() === new Date().toDateString();
+      const time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      return sameDay ? time : `${d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} ${time}`;
+    },
+
+    formatFullTime(iso) {
+      return new Date(iso).toLocaleString('pt-BR', {
+        dateStyle: 'full',
+        timeStyle: 'medium',
+      });
     },
 
     minimize() { window.antigrabber.minimize(); },

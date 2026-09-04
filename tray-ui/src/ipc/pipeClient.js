@@ -13,6 +13,9 @@ const IpcMessageType = Object.freeze({
   BlockEvent: 3,
   AllowAlwaysCommand: 4,
   AllowAlwaysAck: 5,
+  RulesSnapshot: 6,
+  RemoveRuleCommand: 7,
+  SetRuleEnabledCommand: 8,
 });
 
 class PipeClient extends EventEmitter {

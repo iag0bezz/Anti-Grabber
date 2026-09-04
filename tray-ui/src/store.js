@@ -9,6 +9,7 @@ const MAX_EVENTS = 1000;
 const DEFAULT_SETTINGS = {
   persistHistory: true,
   notificationsEnabled: true,
+  notificationsSnoozedUntil: null, // null = off, 'indefinite' = until re-enabled, number = epoch ms
 };
 
 function userDataDir() {
@@ -91,6 +92,21 @@ class Store {
   clearEvents() {
     this.events = [];
     try { fs.unlinkSync(eventsPath()); } catch { }
+  }
+
+  getEvent(id) {
+    return this.events.find((e) => e.id === id) ?? null;
+  }
+
+  getAllEvents() {
+    return [...this.events];
+  }
+
+  notificationsSnoozed() {
+    const until = this.settings.notificationsSnoozedUntil;
+    if (!until) return false;
+    if (until === 'indefinite') return true;
+    return Date.now() < until;
   }
 
   queryEvents({ page = 1, pageSize = 20, search = '', correlatedOnly = false, sinceDays = null } = {}) {
