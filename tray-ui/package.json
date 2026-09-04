@@ -4,6 +4,9 @@
   "private": true,
   "description": "AntiGrabber — ícone de bandeja e feed de atividade",
   "main": "src/main.js",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "start": "electron ."
   },
