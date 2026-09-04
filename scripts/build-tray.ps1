@@ -38,10 +38,5 @@ $assetsDest = Join-Path $dest "assets"
 if (Test-Path $assetsDest) { Remove-Item -Recurse -Force $assetsDest }
 Copy-Item (Join-Path $src "assets") $assetsDest -Recurse
 
-Write-Host "Copiando scripts (update-helper.ps1)..." -ForegroundColor Cyan
-$scriptsDest = Join-Path $dest "scripts"
-New-Item -ItemType Directory -Force -Path $scriptsDest | Out-Null
-Copy-Item (Join-Path $src "scripts\update-helper.ps1") $scriptsDest
-
 $sizeMb = [math]::Round((Get-ChildItem $dest -Recurse | Measure-Object Length -Sum).Sum / 1MB, 1)
 Write-Host "Tray empacotado em $dest ($sizeMb MB)" -ForegroundColor Green

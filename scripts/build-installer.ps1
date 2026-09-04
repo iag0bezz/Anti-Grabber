@@ -12,10 +12,6 @@ $root = Split-Path $cleanScriptRoot -Parent
 & (Join-Path $cleanScriptRoot "fetch-windivert.ps1")
 & (Join-Path $cleanScriptRoot "build-tray.ps1") -Configuration $Configuration -Version $Version
 
-if ($Version) {
-    & (Join-Path $cleanScriptRoot "package-update.ps1") -Version $Version
-}
-
 $iscc = Get-ChildItem -Path "$env:ProgramFiles\Inno Setup 6","${env:ProgramFiles(x86)}\Inno Setup 6","$env:LOCALAPPDATA\Programs\Inno Setup 6" `
     -Filter "ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
 
