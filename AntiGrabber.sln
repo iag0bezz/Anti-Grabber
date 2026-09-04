@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AntiGrabber.TestHarness", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AntiGrabber.Shared", "AntiGrabber.Shared\AntiGrabber.Shared.csproj", "{6A2E5333-5237-4796-AAC0-5D7690B89255}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AntiGrabber.Tray", "AntiGrabber.Tray\AntiGrabber.Tray.csproj", "{72211CEC-D092-4035-80CD-6676A469B797}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -30,5 +32,9 @@ Global
 		{6A2E5333-5237-4796-AAC0-5D7690B89255}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6A2E5333-5237-4796-AAC0-5D7690B89255}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6A2E5333-5237-4796-AAC0-5D7690B89255}.Release|Any CPU.Build.0 = Release|Any CPU
+		{72211CEC-D092-4035-80CD-6676A469B797}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{72211CEC-D092-4035-80CD-6676A469B797}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{72211CEC-D092-4035-80CD-6676A469B797}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{72211CEC-D092-4035-80CD-6676A469B797}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
