@@ -13,15 +13,11 @@
       <span class="brand-icon" :class="statusState">
         <svg viewBox="0 0 64 64" fill="none">
           <path d="M32 4 8 13v16c0 16.5 10.4 27.6 24 31 13.6-3.4 24-14.5 24-31V13L32 4Z" fill="currentColor"/>
-          <template x-if="statusState !== 'recentBlock'">
-            <path d="M21 32.5 28.5 40 44 23" stroke="var(--surface)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-          </template>
-          <template x-if="statusState === 'recentBlock'">
-            <g>
-              <line x1="32" y1="17" x2="32" y2="34" stroke="var(--surface)" stroke-width="6" stroke-linecap="round"/>
-              <circle cx="32" cy="43" r="3.6" fill="var(--surface)"/>
-            </g>
-          </template>
+          <path x-show="statusState !== 'recentBlock'" d="M21 32.5 28.5 40 44 23" stroke="var(--surface)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+          <g x-show="statusState === 'recentBlock'">
+            <line x1="32" y1="17" x2="32" y2="34" stroke="var(--surface)" stroke-width="6" stroke-linecap="round"/>
+            <circle cx="32" cy="43" r="3.6" fill="var(--surface)"/>
+          </g>
         </svg>
       </span>
       <span class="titlebar-text">AntiGrabber</span>
