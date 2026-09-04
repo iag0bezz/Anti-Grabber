@@ -27,7 +27,19 @@ jobs:
 
       - name: Install tray-ui dependencies
         working-directory: tray-ui
-        run: npm ci
+        run: npm ci --foreground-scripts
+
+      - name: Verify Electron binary
+        shell: pwsh
+        working-directory: tray-ui
+        run: |
+          if (-not (Test-Path "node_modules\electron\dist\electron.exe")) {
+            Write-Host "electron.exe ausente após npm ci — rodando install.js de novo..."
+            node node_modules\electron\install.js
+          }
+          if (-not (Test-Path "node_modules\electron\dist\electron.exe")) {
+            throw "electron.exe continua ausente depois do retry — falha real no download."
+          }
 
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
