@@ -134,18 +134,10 @@ padrão, não precisa de `--webhook-url`).
   normalmente. **Isso não afeta o bloqueio em si** — quem bloqueia a
   exfiltração é o `NetworkFilterWorker`, testado e funcionando independente
   disso. Só a mensagem "bloqueamos um roubo" vs "bloqueamos uma conexão
-  suspeita" fica menos precisa. Fix correto é trocar por captura ETW
-  (`Microsoft-Windows-Kernel-FileIO`) — ver comentário `ponytail:` em
-  `TokenFileWatcher.cs`.
+  suspeita" fica menos precisa.
 
-## Roadmap futuro
-
-Fora de escopo do MVP atual, mas cogitado para depois: detecção de clipboard
-hijacking, quarentena automática, modo pânico, score de saúde, detecção de
-screen capture.
-
-**Conta de usuário / login / sincronização em nuvem NÃO é roadmap** — é uma
-decisão de arquitetura permanente (ver seção acima).
+**Conta de usuário / login / sincronização em nuvem NÃO é uma opção
+futura** — é uma decisão de arquitetura permanente (ver seção acima).
 
 ## Segurança
 
