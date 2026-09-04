@@ -41,7 +41,12 @@ app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu-sandbox');
 
 if (!app.requestSingleInstanceLock()) {
+  // app.quit() é assíncrono/gracioso — sem esse return o resto do módulo continuava
+  // rodando numa instância que já tá saindo (whenReady() ainda dispara, registra tudo,
+  // e corre contra o teardown do quit(); qualquer coisa async em andamento nesse meio-
+  // tempo, tipo uma request de rede, pode morrer travada sem erro nem resposta).
   app.quit();
+  return;
 }
 
 app.on('second-instance', () => showWindow());
