@@ -24,8 +24,7 @@ UninstallDisplayIcon={app}\Service\AntiGrabber.Service.exe
 WizardStyle=modern
 
 [Languages]
-Name: "portuguese"; MessagesFile: "compiler:Languages\Portuguese.isl"
-Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
 
 [Types]
 Name: "full"; Description: "Completa (serviço + bandeja)"
