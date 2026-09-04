@@ -316,9 +316,7 @@ public sealed class TrayForm : Form
 
         bridge.On("start-update", args =>
         {
-            var helperScript = Path.Combine(ResolveScriptsRoot(), "update-helper.ps1");
-            var installRoot = ResolveInstallRoot();
-            var t = _updates.ApplyAsync(helperScript, installRoot);
+            var t = _updates.ApplyAsync();
             return Task.FromResult<object?>(true);
         });
 
@@ -441,15 +439,6 @@ public sealed class TrayForm : Form
     private static string ResolveAssetsRoot() => ResolveRoot("assets", Path.Combine("tray-ui", "assets"));
 
     private static string ResolveWebRoot() => ResolveRoot("web", Path.Combine("tray-ui", "src", "renderer"));
-
-    private static string ResolveScriptsRoot() => ResolveRoot("scripts", Path.Combine("tray-ui", "scripts"));
-
-    // Em produção o exe fica em {app}\Tray\AntiGrabber.Tray.exe — a raiz de
-    // instalação ({app}, com Service\ e Tray\ como irmãos) é um nível acima.
-    // Em dev (bin\Debug\...) isso não aponta pra nada útil, mas o fluxo de
-    // aplicar update de verdade só faz sentido contra uma instalação real mesmo.
-    private static string ResolveInstallRoot() =>
-        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, ".."));
 
     private static string ResolveRoot(string packagedSubfolder, string devRelativePath)
     {

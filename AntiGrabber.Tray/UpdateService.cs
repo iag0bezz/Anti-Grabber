@@ -1,15 +1,14 @@
-using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace AntiGrabber.Tray;
 
-public sealed record PendingUpdate(string Version, string Notes, string ZipUrl, string ShaUrl);
+public sealed record PendingUpdate(string Version, string Notes, string SetupUrl, string ShaUrl);
 
-// Porta o subsistema de auto-update do main.js: checa GitHub Releases, só baixa
-// e aplica quando o usuário confirma. HttpClient no lugar de electron.net —
-// sem a classe de bug de proxy-hang que motivou usar electron.net em vez de
-// node:https no processo principal do Electron; aqui não existe esse problema.
+// Checa GitHub Releases, só baixa e aplica quando o usuário confirma. Baixa o
+// próprio AntiGrabberSetup.exe (mesmo instalador Inno Setup do release) e roda
+// ele elevado em modo silencioso — não existe mais artefato de update separado
+// (zip+manifest): instalador e auto-update são o mesmo binário.
 public sealed class UpdateService
 {
     private const string GitHubRepo = "iag0bezz/Anti-Grabber";
@@ -45,21 +44,21 @@ public sealed class UpdateService
             if (CompareVersions(remoteVersion, GetAppVersion()) <= 0) return;
             if (_store.GetSettings().SkippedVersion == remoteVersion) return;
 
-            string? zipUrl = null, shaUrl = null;
+            string? setupUrl = null, shaUrl = null;
             if (root.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
             {
                 foreach (var asset in assets.EnumerateArray())
                 {
                     var name = asset.GetProperty("name").GetString();
                     var url = asset.GetProperty("browser_download_url").GetString();
-                    if (name == $"AntiGrabberUpdate-{remoteVersion}.zip") zipUrl = url;
-                    else if (name == $"AntiGrabberUpdate-{remoteVersion}.zip.sha256") shaUrl = url;
+                    if (name == "AntiGrabberSetup.exe") setupUrl = url;
+                    else if (name == "AntiGrabberSetup.exe.sha256") shaUrl = url;
                 }
             }
-            if (zipUrl is null || shaUrl is null) return;
+            if (setupUrl is null || shaUrl is null) return;
 
             var notes = root.TryGetProperty("body", out var b) ? b.GetString() ?? "" : "";
-            Pending = new PendingUpdate(remoteVersion, notes, zipUrl, shaUrl);
+            Pending = new PendingUpdate(remoteVersion, notes, setupUrl, shaUrl);
             _send("update-available", new { version = remoteVersion, notes });
         }
         catch
@@ -81,7 +80,7 @@ public sealed class UpdateService
         return 0;
     }
 
-    public async Task ApplyAsync(string helperScriptPath, string installRoot)
+    public async Task ApplyAsync()
     {
         if (Pending is not { } pending || _inProgress) return;
         _inProgress = true;
@@ -91,42 +90,26 @@ public sealed class UpdateService
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "AntiGrabber", "updates", pending.Version);
             Directory.CreateDirectory(workDir);
-            var zipPath = Path.Combine(workDir, "update.zip");
-            var extractDir = Path.Combine(workDir, "extracted");
+            var setupPath = Path.Combine(workDir, "AntiGrabberSetup.exe");
 
             _send("update-progress", new { phase = "downloading", percent = 0 });
-            await DownloadAsync(pending.ZipUrl, zipPath, percent => _send("update-progress", new { phase = "downloading", percent }));
+            await DownloadAsync(pending.SetupUrl, setupPath, percent => _send("update-progress", new { phase = "downloading", percent }));
 
             _send("update-progress", new { phase = "verifying" });
             var shaText = await _http.GetStringAsync(pending.ShaUrl);
             var expectedHash = shaText.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.ToLowerInvariant() ?? "";
-            var actualHash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(zipPath))).ToLowerInvariant();
-            if (expectedHash.Length == 0 || actualHash != expectedHash) throw new InvalidOperationException("hash-mismatch-zip");
+            var actualHash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(setupPath))).ToLowerInvariant();
+            if (expectedHash.Length == 0 || actualHash != expectedHash) throw new InvalidOperationException("hash-mismatch-setup");
 
-            _send("update-progress", new { phase = "extracting" });
-            if (Directory.Exists(extractDir)) Directory.Delete(extractDir, recursive: true);
-            ZipFile.ExtractToDirectory(zipPath, extractDir);
-
-            var manifestJson = await File.ReadAllTextAsync(Path.Combine(extractDir, "manifest.json"));
-            using (var manifest = JsonDocument.Parse(manifestJson))
-            {
-                foreach (var f in manifest.RootElement.GetProperty("files").EnumerateArray())
-                {
-                    var relPath = f.GetProperty("path").GetString()!;
-                    var expected = f.GetProperty("sha256").GetString()!.ToLowerInvariant();
-                    var actual = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(Path.Combine(extractDir, relPath)))).ToLowerInvariant();
-                    if (actual != expected) throw new InvalidOperationException($"hash-mismatch-file:{relPath}");
-                }
-            }
-
-            _send("update-progress", new { phase = "elevating" });
-            var ok = await RunElevatedHelperAsync(helperScriptPath, extractDir, installRoot);
-            if (!ok) throw new InvalidOperationException("helper-failed");
+            // Instalador roda elevado e silencioso, sobrescreve a instalação atual
+            // (mesmo AppId do Inno Setup = update in-place) e relança o Tray sozinho
+            // (ver [Run] com Check: WizardSilent no .iss) — inclusive fecha este
+            // processo (taskkill no [Code] do .iss antes de copiar arquivos).
+            _send("update-progress", new { phase = "installing" });
+            var ok = await RunInstallerElevatedAsync(setupPath);
+            if (!ok) throw new InvalidOperationException("installer-failed");
 
             _send("update-progress", new { phase = "relaunching" });
-            try { Directory.Delete(workDir, recursive: true); } catch { }
-
-            System.Diagnostics.Process.Start(Environment.ProcessPath!);
             Environment.Exit(0);
         }
         catch (Exception ex)
@@ -158,12 +141,11 @@ public sealed class UpdateService
         }
     }
 
-    // Mesmo padrão manual usado várias vezes nesta sessão via PowerShell — só que
-    // aqui é nativo: ProcessStartInfo.Verb="runas" já dispara o UAC e devolve o
-    // ExitCode direto, sem precisar do truque de gravar o código num arquivo temp
-    // que o main.js original precisava (Start-Process -Verb RunAs não devolve
-    // ExitCode pro processo pai de outro jeito).
-    private static Task<bool> RunElevatedHelperAsync(string scriptPath, string stagingDir, string installDir)
+    // ProcessStartInfo.Verb="runas" dispara o UAC e devolve o ExitCode direto do
+    // instalador Inno Setup. Flags silenciosas: /VERYSILENT sem wizard nem barra
+    // de progresso própria (o Tray já mostra o progresso via "update-progress"),
+    // /SUPPRESSMSGBOXES evita prompts, /NORESTART não reinicia o Windows.
+    private static Task<bool> RunInstallerElevatedAsync(string setupPath)
     {
         return Task.Run(() =>
         {
@@ -171,19 +153,14 @@ public sealed class UpdateService
             {
                 var psi = new System.Diagnostics.ProcessStartInfo
                 {
-                    FileName = "powershell",
+                    FileName = setupPath,
                     UseShellExecute = true,
                     Verb = "runas",
                 };
-                psi.ArgumentList.Add("-NoProfile");
-                psi.ArgumentList.Add("-ExecutionPolicy");
-                psi.ArgumentList.Add("Bypass");
-                psi.ArgumentList.Add("-File");
-                psi.ArgumentList.Add(scriptPath);
-                psi.ArgumentList.Add("-StagingDir");
-                psi.ArgumentList.Add(stagingDir);
-                psi.ArgumentList.Add("-InstallDir");
-                psi.ArgumentList.Add(installDir);
+                psi.ArgumentList.Add("/VERYSILENT");
+                psi.ArgumentList.Add("/SUPPRESSMSGBOXES");
+                psi.ArgumentList.Add("/NORESTART");
+                psi.ArgumentList.Add("/SP-");
 
                 using var process = System.Diagnostics.Process.Start(psi);
                 process?.WaitForExit();
