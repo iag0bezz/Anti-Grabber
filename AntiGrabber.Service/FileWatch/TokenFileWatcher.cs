@@ -68,7 +68,7 @@ public sealed class TokenFileWatcher : BackgroundService
         var pid = FileAccessProcessResolver.TryResolveAccessingPid(path);
         if (pid is not null)
         {
-            _correlationTracker.RecordFileAccess(pid.Value);
+            _correlationTracker.RecordFileAccess(pid.Value, path);
         }
 
         _logger.LogInformation(

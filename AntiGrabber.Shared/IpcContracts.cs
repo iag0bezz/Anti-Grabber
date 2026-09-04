@@ -41,6 +41,9 @@ public sealed class BlockEventPayload
     [JsonPropertyName("domain")] public string Domain { get; set; } = "";
     [JsonPropertyName("plainLanguageMessage")] public string PlainLanguageMessage { get; set; } = "";
     [JsonPropertyName("correlatedFileAccess")] public bool CorrelatedFileAccess { get; set; }
+    [JsonPropertyName("pid")] public int? Pid { get; set; }
+    [JsonPropertyName("localPort")] public int LocalPort { get; set; }
+    [JsonPropertyName("correlatedFilePath")] public string? CorrelatedFilePath { get; set; }
 }
 
 public sealed class AllowAlwaysPayload

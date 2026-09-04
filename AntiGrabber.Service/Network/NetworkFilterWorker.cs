@@ -90,6 +90,7 @@ public sealed class NetworkFilterWorker : BackgroundService
             return true;
 
         var correlatedFileAccess = pid is not null && _correlationTracker.HasRecentFileAccess(pid.Value);
+        var correlatedFilePath = pid is not null ? _correlationTracker.TryGetRecentFilePath(pid.Value) : null;
         _blockStats.RecordBlock();
 
         _logger.LogWarning(
@@ -105,6 +106,9 @@ public sealed class NetworkFilterWorker : BackgroundService
                 ProcessName = processName ?? "processo desconhecido",
                 Domain = sni,
                 CorrelatedFileAccess = correlatedFileAccess,
+                Pid = pid,
+                LocalPort = localPort,
+                CorrelatedFilePath = correlatedFilePath,
                 PlainLanguageMessage = correlatedFileAccess
                     ? $"Bloqueamos uma tentativa de roubo: {processName ?? "um programa"} tentou enviar dados para {sni} logo após acessar seus arquivos."
                     : $"Bloqueamos uma conexão suspeita: {processName ?? "um programa"} tentou falar com {sni} sem autorização.",
