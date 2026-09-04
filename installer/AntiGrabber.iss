@@ -1,5 +1,7 @@
 #define MyAppName "AntiGrabber"
-#define MyAppVersion "0.1.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.1.0"
+#endif
 #define MyAppPublisher "AntiGrabber contributors"
 #define MyServiceName "AntiGrabberService"
 #define DistDir "..\dist"

@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install tray-ui dependencies
+        working-directory: tray-ui
+        run: npm ci
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Resolve version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build installer
+        shell: pwsh
+        run: .\scripts\build-installer.ps1 -Configuration Release -Version "${{ steps.version.outputs.version }}"
+
+      - name: Hash installer
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash "dist\installer\AntiGrabberSetup.exe" -Algorithm SHA256).Hash
+          "$hash  AntiGrabberSetup.exe" | Out-File "dist\installer\AntiGrabberSetup.exe.sha256" -Encoding ascii
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/installer/AntiGrabberSetup.exe
+            dist/installer/AntiGrabberSetup.exe.sha256

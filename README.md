@@ -67,28 +67,33 @@ JRSoftware.InnoSetup`).
 ```
 
 Publica Service/TestHarness como `.exe` self-contained single-file win-x64,
-empacota só o código do Tray (JS/HTML/CSS, ~20KB, sem o runtime Electron) e
-compila `dist\installer\AntiGrabberSetup.exe` — um instalador único (~45MB)
-com wizard, componentes opcionais (serviço / bandeja / TestHarness), atalhos
-de Menu Iniciar e desinstalador próprio registrado em
-Adicionar/Remover Programas.
+empacota o Tray com o runtime Electron completo (Node+Chromium, sem precisar
+baixar nada durante a instalação), baixa e verifica por SHA256 o
+redistributable do WinDivert, e compila `dist\installer\AntiGrabberSetup.exe`
+— um instalador único (~150MB) com wizard, componentes opcionais (serviço /
+bandeja / TestHarness), atalhos de Menu Iniciar e desinstalador próprio
+registrado em Adicionar/Remover Programas.
 
-**O runtime do Electron (Node+Chromium, ~150MB) não vem embutido.** O
-instalador baixa direto de
-`github.com/electron/electron/releases` (versão fixada, verificada por
-SHA256 antes de extrair) durante a instalação, e cacheia em
-`%LocalAppData%\AntiGrabber\electron-runtime\` — reinstalar não baixa de
-novo. Ver `installer/AntiGrabber.iss` (seção `[Code]`) pra atualizar a
-versão fixada.
-
-O pacote NuGet `WindivertDotnet` não inclui os binários nativos do driver.
-Baixe o redistributable oficial em https://reqrypt.org/windivert.html e
-copie `WinDivert.dll` + `WinDivert64.sys` para dentro de
-`dist\AntiGrabber.Service\` **antes** de rodar `build-installer.ps1` (assim
-eles entram empacotados no instalador).
+O pacote NuGet `WindivertDotnet` não inclui os binários nativos do driver —
+`build-installer.ps1` chama `scripts\fetch-windivert.ps1`, que baixa o
+redistributable oficial de uma versão fixada e confere o SHA256 antes de
+copiar `WinDivert.dll` + `WinDivert64.sys` pra dentro de
+`dist\AntiGrabber.Service\`. Nenhum passo manual necessário.
 
 Só publicar sem empacotar instalador: `.\scripts\publish.ps1` (Service +
 TestHarness) e `.\scripts\build-tray.ps1` (Tray).
+
+## Releases automáticos
+
+Toda tag `v*.*.*` empurrada pro repositório dispara o workflow
+`.github/workflows/release.yml`: builda o instalador do zero num runner
+Windows e publica `AntiGrabberSetup.exe` (+ hash SHA256) como asset de uma
+GitHub Release com esse número de versão.
+
+```powershell
+git tag v1.2.0
+git push --tags
+```
 
 ## Instalar / desinstalar
 
