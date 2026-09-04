@@ -47,5 +47,3 @@ jobs:
           files: |
             dist/installer/AntiGrabberSetup.exe
             dist/installer/AntiGrabberSetup.exe.sha256
-            dist/installer/AntiGrabberUpdate-${{ steps.version.outputs.version }}.zip
-            dist/installer/AntiGrabberUpdate-${{ steps.version.outputs.version }}.zip.sha256
