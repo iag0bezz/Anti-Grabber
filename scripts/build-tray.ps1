@@ -23,7 +23,18 @@ Write-Host "Copiando runtime Electron..." -ForegroundColor Cyan
 Copy-Item "$electronDist\*" $dest -Recurse
 
 Write-Host "Renomeando electron.exe -> AntiGrabber.Tray.exe..." -ForegroundColor Cyan
+$trayExe = Join-Path $dest "AntiGrabber.Tray.exe"
 Rename-Item (Join-Path $dest "electron.exe") "AntiGrabber.Tray.exe"
+
+$appIcon = Join-Path $src "assets\app.ico"
+$rcedit = Join-Path $src "node_modules\rcedit\bin\rcedit-x64.exe"
+if ((Test-Path $rcedit) -and (Test-Path $appIcon)) {
+    Write-Host "Aplicando ícone da AntiGrabber ao executável..." -ForegroundColor Cyan
+    & $rcedit $trayExe --set-icon $appIcon
+    if ($LASTEXITCODE -ne 0) { throw "rcedit falhou ao trocar o ícone de $trayExe" }
+} else {
+    Write-Host "rcedit ou assets\app.ico não encontrados — ícone padrão do Electron mantido (rode 'npm install' em tray-ui\)." -ForegroundColor Yellow
+}
 
 $appDest = Join-Path $dest "resources\app"
 Write-Host "Copiando nosso código pra resources\app\ (carregado automaticamente pelo Electron)..." -ForegroundColor Cyan
