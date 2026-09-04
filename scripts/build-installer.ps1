@@ -10,7 +10,7 @@ $root = Split-Path $cleanScriptRoot -Parent
 
 & (Join-Path $cleanScriptRoot "publish.ps1") -Configuration $Configuration
 & (Join-Path $cleanScriptRoot "fetch-windivert.ps1")
-& (Join-Path $cleanScriptRoot "build-tray.ps1")
+& (Join-Path $cleanScriptRoot "build-tray.ps1") -Configuration $Configuration -Version $Version
 
 if ($Version) {
     & (Join-Path $cleanScriptRoot "package-update.ps1") -Version $Version

@@ -16,6 +16,8 @@ $projects = @(
     @{ Name = "AntiGrabber.TestHarness"; Path = "AntiGrabber.TestHarness\AntiGrabber.TestHarness.csproj" }
 )
 
+# AntiGrabber.Tray publica separado via build-tray.ps1 (também copia web/assets/scripts).
+
 foreach ($p in $projects) {
     $out = Join-Path $OutputRoot $p.Name
     Write-Host "Publicando $($p.Name) -> $out" -ForegroundColor Cyan

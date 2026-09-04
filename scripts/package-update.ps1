@@ -26,12 +26,17 @@ $serviceDest = Join-Path $updateDir "Service"
 New-Item -ItemType Directory -Force -Path $serviceDest | Out-Null
 Copy-Item $serviceExe $serviceDest
 
-Write-Host "Copiando código do Tray..." -ForegroundColor Cyan
-$trayAppDest = Join-Path $updateDir "Tray\resources\app"
-New-Item -ItemType Directory -Force -Path $trayAppDest | Out-Null
-Copy-Item (Join-Path $root "tray-ui\src") $trayAppDest -Recurse
-Copy-Item (Join-Path $root "tray-ui\assets") $trayAppDest -Recurse
-Copy-Item (Join-Path $root "tray-ui\package.json") $trayAppDest
+$trayExe = Join-Path $OutputRoot "AntiGrabber.Tray\AntiGrabber.Tray.exe"
+if (-not (Test-Path $trayExe)) {
+    throw "AntiGrabber.Tray.exe não encontrado em $trayExe — rode build-tray.ps1 primeiro."
+}
+
+Write-Host "Copiando Tray..." -ForegroundColor Cyan
+$trayDest = Join-Path $updateDir "Tray"
+New-Item -ItemType Directory -Force -Path $trayDest | Out-Null
+Copy-Item $trayExe $trayDest
+Copy-Item (Join-Path $OutputRoot "AntiGrabber.Tray\web") (Join-Path $trayDest "web") -Recurse
+Copy-Item (Join-Path $OutputRoot "AntiGrabber.Tray\assets") (Join-Path $trayDest "assets") -Recurse
 
 Write-Host "Gerando manifest.json..." -ForegroundColor Cyan
 $files = Get-ChildItem $updateDir -Recurse -File

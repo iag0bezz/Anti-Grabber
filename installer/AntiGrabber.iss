@@ -44,9 +44,9 @@ Source: "..\SECURITY.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\Tray\AntiGrabber.Tray.exe"; Components: tray
+Name: "{group}\{#MyAppName}"; Filename: "{app}\Tray\AntiGrabber.Tray.exe"; Components: tray; AppUserModelID: "com.antigrabber.tray"
 Name: "{group}\Desinstalar {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{commonstartup}\{#MyAppName}"; Filename: "{app}\Tray\AntiGrabber.Tray.exe"; Components: tray; Tasks: startuptray
+Name: "{commonstartup}\{#MyAppName}"; Filename: "{app}\Tray\AntiGrabber.Tray.exe"; Components: tray; Tasks: startuptray; AppUserModelID: "com.antigrabber.tray"
 
 [Tasks]
 Name: "startuptray"; Description: "Iniciar o ícone de bandeja junto com o Windows"; Components: tray

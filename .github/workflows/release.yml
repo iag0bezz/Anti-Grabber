@@ -20,27 +20,6 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Install tray-ui dependencies
-        working-directory: tray-ui
-        run: npm ci --foreground-scripts
-
-      - name: Verify Electron binary
-        shell: pwsh
-        working-directory: tray-ui
-        run: |
-          if (-not (Test-Path "node_modules\electron\dist\electron.exe")) {
-            Write-Host "electron.exe ausente após npm ci — rodando install.js de novo..."
-            node node_modules\electron\install.js
-          }
-          if (-not (Test-Path "node_modules\electron\dist\electron.exe")) {
-            throw "electron.exe continua ausente depois do retry — falha real no download."
-          }
-
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
@@ -50,10 +29,6 @@ jobs:
         run: |
           $version = "${{ github.ref_name }}" -replace '^v', ''
           "version=$version" >> $env:GITHUB_OUTPUT
-
-      - name: Set tray-ui package version
-        working-directory: tray-ui
-        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
 
       - name: Build installer
         shell: pwsh
