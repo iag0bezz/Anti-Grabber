@@ -3,16 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "description": "AntiGrabber — ícone de bandeja e feed de atividade",
-  "main": "src/main.js",
   "engines": {
     "node": ">=22.12.0"
   },
-  "scripts": {
-    "start": "electron ."
-  },
   "devDependencies": {
-    "electron": "44.1.1",
-    "rcedit": "^5.0.2",
     "sharp": "^0.35.4",
     "to-ico": "^1.1.5"
   },
