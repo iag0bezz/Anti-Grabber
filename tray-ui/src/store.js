@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { app } = require('electron');
+const { DEFAULT_LANGUAGE } = require('./renderer/i18n');
 
 const MAX_EVENTS = 1000;
 
@@ -10,6 +11,7 @@ const DEFAULT_SETTINGS = {
   persistHistory: true,
   notificationsEnabled: true,
   notificationsSnoozedUntil: null, // null = off, 'indefinite' = until re-enabled, number = epoch ms
+  language: DEFAULT_LANGUAGE,
 };
 
 function userDataDir() {

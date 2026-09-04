@@ -6,6 +6,7 @@ const { pathToFileURL } = require('node:url');
 const { app, Tray, Menu, BrowserWindow, ipcMain, Notification, nativeImage, shell, dialog } = require('electron');
 const { PipeClient, IpcMessageType } = require('./ipc/pipeClient');
 const { Store } = require('./store');
+const { translate } = require('./renderer/i18n');
 
 const ASSETS_DIR = path.join(__dirname, '..', 'assets');
 const TRAY_ICON_PATHS = {
@@ -51,23 +52,27 @@ app.on('window-all-closed', (e) => e.preventDefault());
 function createTray() {
   tray = new Tray(TRAY_ICONS.idle);
   setTrayState('idle');
+  rebuildTrayMenu();
+  tray.on('double-click', () => showWindow());
+}
 
+function rebuildTrayMenu() {
+  const lang = store?.getSettings().language;
   const menu = Menu.buildFromTemplate([
-    { label: 'Abrir AntiGrabber', click: () => showWindow() },
+    { label: translate(lang, 'menu.open'), click: () => showWindow() },
     { type: 'separator' },
-    { label: 'Sair', click: () => app.exit(0) },
+    { label: translate(lang, 'menu.quit'), click: () => app.exit(0) },
   ]);
   tray.setContextMenu(menu);
-  tray.on('double-click', () => showWindow());
 }
 
 function setTrayState(state) {
   currentTrayState = state;
+  const lang = store?.getSettings().language;
+  const stateKey = state === 'active' ? 'tray.active' : state === 'block' ? 'tray.block' : 'tray.idle';
   tray.setToolTip(
-    (state === 'active' ? 'AntiGrabber — protegendo' :
-    state === 'block' ? 'AntiGrabber — bloqueio recente' :
-    'AntiGrabber — ocioso') +
-    (unseenBlockCount > 0 ? ` (${unseenBlockCount} não vistos)` : '')
+    translate(lang, stateKey) +
+    (unseenBlockCount > 0 ? translate(lang, 'tray.unseenSuffix', { n: unseenBlockCount }) : '')
   );
   refreshTrayIcon();
 }
@@ -215,16 +220,18 @@ function scheduleRevertToActive() {
 
 function showBlockNotification(ev) {
   if (!ev) return;
+  const lang = store?.getSettings().language;
+  const vars = { process: ev.processName, domain: ev.domain };
+  const message = translate(lang, ev.correlatedFileAccess ? 'blockMsg.correlated' : 'blockMsg.suspicious', vars);
   const detailLines = [
-    `Programa: ${ev.processName}`,
-    `Domínio: ${ev.domain}`,
-    ev.correlatedFileAccess ? 'Acesso a arquivo sensível detectado logo antes' : null,
+    translate(lang, 'notif.program', vars),
+    translate(lang, 'notif.domain', vars),
+    ev.correlatedFileAccess ? translate(lang, 'notif.correlatedNote') : null,
   ].filter(Boolean);
 
   const notification = new Notification({
-    title: 'AntiGrabber bloqueou uma tentativa',
-    body: (ev.plainLanguageMessage || `Bloqueamos uma conexão de ${ev.processName} para ${ev.domain}.`) +
-      '\n' + detailLines.join(' · '),
+    title: translate(lang, 'notif.title'),
+    body: message + '\n' + detailLines.join(' · '),
     icon: TRAY_ICONS.block,
   });
   notification.on('click', () => {
@@ -267,7 +274,14 @@ ipcMain.handle('get-events', (_e, query) => store.queryEvents(query));
 ipcMain.handle('get-event', (_e, id) => store.getEvent(id));
 ipcMain.handle('clear-history', () => { store.clearEvents(); return true; });
 ipcMain.handle('get-settings', () => store.getSettings());
-ipcMain.handle('update-settings', (_e, partial) => store.updateSettings(partial));
+ipcMain.handle('update-settings', (_e, partial) => {
+  const updated = store.updateSettings(partial);
+  if (partial.language) {
+    rebuildTrayMenu();
+    setTrayState(currentTrayState);
+  }
+  return updated;
+});
 
 ipcMain.handle('open-logs-folder', () => {
   const logsDir = path.join(process.env.ProgramData || 'C:\\ProgramData', 'AntiGrabber', 'logs');
@@ -279,7 +293,7 @@ ipcMain.handle('export-history', async () => {
   if (!events.length) return { ok: false, reason: 'empty' };
 
   const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-    title: 'Exportar histórico de bloqueios',
+    title: translate(store.getSettings().language, 'export.dialogTitle'),
     defaultPath: `antigrabber-historico-${new Date().toISOString().slice(0, 10)}.json`,
     filters: [
       { name: 'JSON', extensions: ['json'] },

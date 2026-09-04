@@ -6,7 +6,7 @@
   <title>AntiGrabber</title>
   <link rel="stylesheet" href="style.css" />
 </head>
-<body x-data="app()" x-init="init()">
+<body x-data="app()" x-init="init()" :lang="language">
 
   <div class="titlebar">
     <div class="titlebar-drag">
@@ -35,10 +35,10 @@
       </span>
     </div>
     <div class="titlebar-buttons">
-      <button class="icon-btn" @click="minimize()" title="Minimizar">
+      <button class="icon-btn" @click="minimize()" :title="t('title.minimize')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>
       </button>
-      <button class="icon-btn danger-hover" @click="close()" title="Fechar">
+      <button class="icon-btn danger-hover" @click="close()" :title="t('title.close')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
       </button>
     </div>
@@ -46,20 +46,20 @@
 
   <div class="shell">
     <nav class="rail">
-      <button class="rail-btn" :class="{ active: tab === 'feed' }" @click="tab = 'feed'" title="Atividade">
+      <button class="rail-btn" :class="{ active: tab === 'feed' }" @click="tab = 'feed'" :title="t('nav.activity')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11Z"/></svg>
-        <span>Atividade</span>
+        <span x-text="t('nav.activity')"></span>
       </button>
-      <button class="rail-btn" :class="{ active: tab === 'exceptions' }" @click="tab = 'exceptions'" title="Exceções">
+      <button class="rail-btn" :class="{ active: tab === 'exceptions' }" @click="tab = 'exceptions'" :title="t('nav.exceptions')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/><path d="M2 12h6M16 12h6" stroke-opacity=".4"/></svg>
-        <span>Exceções</span>
+        <span x-text="t('nav.exceptions')"></span>
       </button>
-      <button class="rail-btn" :class="{ active: tab === 'settings' }" @click="tab = 'settings'" title="Configurações">
+      <button class="rail-btn" :class="{ active: tab === 'settings' }" @click="tab = 'settings'" :title="t('nav.settingsFull')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
-        <span>Config</span>
+        <span x-text="t('nav.settings')"></span>
       </button>
       <div class="rail-spacer"></div>
-      <div class="rail-stat" title="Bloqueios nas últimas 24h">
+      <div class="rail-stat" :title="t('rail.blocks24hTitle')">
         <strong x-text="blocksLast24h"></strong>
         <span>24h</span>
       </div>
@@ -69,25 +69,25 @@
       <div class="toolbar">
         <div class="search-box">
           <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-          <input type="search" placeholder="Buscar por domínio ou programa..." x-model.debounce.250ms="search" @input="page = 1; loadFeed()" />
+          <input type="search" :placeholder="t('feed.searchPlaceholder')" x-model.debounce.250ms="search" @input="page = 1; loadFeed()" />
         </div>
         <label class="popover-row check-row inline-check">
           <input type="checkbox" x-model="correlatedOnly" @change="page = 1; loadFeed()" />
-          <span>Só com acesso a arquivo</span>
+          <span x-text="t('feed.fileAccessOnly')"></span>
         </label>
         <select class="period-select" x-model="sinceDays" @change="page = 1; loadFeed()">
-          <option value="">Todo o período</option>
-          <option value="1">Hoje</option>
-          <option value="7">7 dias</option>
-          <option value="30">30 dias</option>
+          <option value="" x-text="t('feed.periodAll')"></option>
+          <option value="1" x-text="t('feed.periodToday')"></option>
+          <option value="7" x-text="t('feed.period7d')"></option>
+          <option value="30" x-text="t('feed.period30d')"></option>
         </select>
-        <span class="feed-meta" x-show="total > 0" x-cloak x-text="total + ' bloqueio' + (total === 1 ? '' : 's')"></span>
+        <span class="feed-meta" x-show="total > 0" x-cloak x-text="t('feed.count', { n: total })"></span>
       </div>
 
       <div class="feed-scroll">
         <div class="empty-state" x-show="!loading && total === 0" x-cloak>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11Z"/></svg>
-          <p x-text="hasActiveFilters() ? 'Nenhum bloqueio bate com esse filtro.' : 'Nenhum bloqueio ainda. Quando bloquearmos alguma tentativa de roubo, ela aparece aqui.'"></p>
+          <p x-text="hasActiveFilters() ? t('feed.emptyFiltered') : t('feed.emptyNone')"></p>
         </div>
 
         <ul class="feed-list">
@@ -96,15 +96,15 @@
               <span class="feed-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>
               </span>
-              <span class="feed-msg" x-text="ev.plainLanguageMessage"></span>
+              <span class="feed-msg" x-text="blockMessage(ev)"></span>
               <span class="feed-chip" x-show="ev.correlatedFileAccess" x-cloak>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2Z"/><path d="M14 2v6h6"/><path d="M12 12v3M12 18h.01"/></svg>
-                Arquivo
+                <span x-text="t('feed.fileChip')"></span>
               </span>
               <span class="feed-time" x-text="formatRowTime(ev.timestamp)"></span>
               <button class="allow-btn" :class="{ done: isAllowed(ev.domain, ev.processName) }" :disabled="isAllowed(ev.domain, ev.processName)" @click.stop="allow(ev)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-                <span x-text="isAllowed(ev.domain, ev.processName) ? 'Permitido' : 'Permitir'"></span>
+                <span x-text="isAllowed(ev.domain, ev.processName) ? t('feed.allowed') : t('feed.allow')"></span>
               </button>
             </li>
           </template>
@@ -125,20 +125,20 @@
     <section class="panel exceptions-panel" x-show="tab === 'exceptions'" x-cloak>
       <div class="toolbar">
         <div class="new-rule-form">
-          <input type="text" placeholder="Domínio (ex: discord.com)" x-model="newRuleDomain" @keydown.enter="addRule()" />
-          <input type="text" placeholder="Programa (ex: Discord.exe)" x-model="newRuleProcess" @keydown.enter="addRule()" />
+          <input type="text" :placeholder="t('exceptions.domainPlaceholder')" x-model="newRuleDomain" @keydown.enter="addRule()" />
+          <input type="text" :placeholder="t('exceptions.processPlaceholder')" x-model="newRuleProcess" @keydown.enter="addRule()" />
           <button class="btn-outline small" @click="addRule()" :disabled="!newRuleDomain.trim() || !newRuleProcess.trim()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
-            Criar exceção
+            <span x-text="t('exceptions.create')"></span>
           </button>
         </div>
-        <span class="feed-meta" x-show="rules.length > 0" x-cloak x-text="rules.length + ' exceção' + (rules.length === 1 ? '' : 'ões')"></span>
+        <span class="feed-meta" x-show="rules.length > 0" x-cloak x-text="t('exceptions.count', { n: rules.length })"></span>
       </div>
 
       <div class="feed-scroll">
         <div class="empty-state" x-show="rules.length === 0" x-cloak>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-          <p>Nenhuma exceção criada ainda. Quando você clicar em "Permitir" num bloqueio, ou criar uma manualmente aqui em cima, ela aparece nesta lista.</p>
+          <p x-text="t('exceptions.emptyState')"></p>
         </div>
 
         <ul class="feed-list">
@@ -149,11 +149,11 @@
                 <span class="rule-arrow">→</span>
                 <span class="rule-domain" x-text="rule.domain"></span>
               </div>
-              <span class="feed-time" x-text="'desde ' + formatRowTime(rule.createdAt)"></span>
-              <label class="switch-row rule-switch" :title="rule.enabled ? 'Desativar exceção' : 'Reativar exceção'">
+              <span class="feed-time" x-text="t('exceptions.since', { date: formatRowTime(rule.createdAt) })"></span>
+              <label class="switch-row rule-switch" :title="rule.enabled ? t('exceptions.disable') : t('exceptions.enable')">
                 <input type="checkbox" :checked="rule.enabled" @change="toggleRule(rule)" />
               </label>
-              <button class="btn-outline danger small" @click="revokeRule(rule)">Revogar</button>
+              <button class="btn-outline danger small" @click="revokeRule(rule)" x-text="t('exceptions.revoke')"></button>
             </li>
           </template>
         </ul>
@@ -166,44 +166,56 @@
           <section class="settings-section">
             <h3>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
-              Notificações
+              <span x-text="t('settings.notifications')"></span>
             </h3>
             <label class="switch-row">
-              <span>Mostrar notificação ao bloquear</span>
+              <span x-text="t('settings.notifyOnBlock')"></span>
               <input type="checkbox" x-model="notificationsEnabled" @change="saveSettings()" />
             </label>
 
             <div class="snooze-box" x-show="notificationsEnabled">
-              <p class="settings-note settings-note-small">Silenciar notificações</p>
+              <p class="settings-note settings-note-small" x-text="t('settings.snoozeTitle')"></p>
               <div class="snooze-options">
-                <button class="chip-btn" @click="snoozeFor(15)">15 min</button>
-                <button class="chip-btn" @click="snoozeFor(60)">1 hora</button>
-                <button class="chip-btn" @click="snoozeFor(240)">4 horas</button>
-                <button class="chip-btn" @click="snoozeFor(480)">8 horas</button>
-                <button class="chip-btn" @click="snoozeIndefinite()">Até eu reativar</button>
+                <button class="chip-btn" @click="snoozeFor(15)" x-text="t('settings.snooze15')"></button>
+                <button class="chip-btn" @click="snoozeFor(60)" x-text="t('settings.snooze1h')"></button>
+                <button class="chip-btn" @click="snoozeFor(240)" x-text="t('settings.snooze4h')"></button>
+                <button class="chip-btn" @click="snoozeFor(480)" x-text="t('settings.snooze8h')"></button>
+                <button class="chip-btn" @click="snoozeIndefinite()" x-text="t('settings.snoozeIndefinite')"></button>
               </div>
               <div class="snooze-active-row" x-show="snoozeActive()" x-cloak>
-                <span x-text="'Silenciado: ' + snoozeLabel()"></span>
-                <button class="btn-outline small" @click="clearSnooze()">Reativar agora</button>
+                <span x-text="t('settings.snoozedPrefix', { label: snoozeLabel() })"></span>
+                <button class="btn-outline small" @click="clearSnooze()" x-text="t('settings.reactivateNow')"></button>
               </div>
             </div>
           </section>
 
           <section class="settings-section">
-            <h3>Apps monitorados</h3>
+            <h3>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/></svg>
+              <span x-text="t('settings.language')"></span>
+            </h3>
+            <div class="snooze-options">
+              <template x-for="opt in languageOptions" :key="opt.code">
+                <button class="chip-btn" :class="{ active: language === opt.code }" @click="setLanguage(opt.code)" x-text="opt.label"></button>
+              </template>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <h3 x-text="t('settings.monitoredApps')"></h3>
             <div class="apps-row">
               <template x-for="appName in monitoredApps" :key="appName">
                 <span class="app-chip" x-text="appName"></span>
               </template>
-              <span class="settings-note" x-show="monitoredApps.length === 0" x-cloak>Nenhum detectado ainda.</span>
+              <span class="settings-note" x-show="monitoredApps.length === 0" x-cloak x-text="t('settings.noneDetected')"></span>
             </div>
           </section>
 
           <section class="settings-section">
-            <h3>Logs</h3>
+            <h3 x-text="t('settings.logs')"></h3>
             <button class="btn-outline" @click="openLogsFolder()">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9L11 6h5a2 2 0 0 1 2 2v2"/></svg>
-              Abrir pasta de logs do serviço
+              <span x-text="t('settings.openLogsFolder')"></span>
             </button>
           </section>
         </div>
@@ -212,26 +224,22 @@
           <section class="settings-section">
             <h3>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg>
-              Privacidade e dados
+              <span x-text="t('settings.privacy')"></span>
             </h3>
-            <p class="settings-note">
-              Tudo nesta tela fica só neste computador — nada é enviado pra
-              nenhum servidor. O serviço também nunca lê ou envia o conteúdo real
-              dos seus arquivos, só nomes e metadados.
-            </p>
+            <p class="settings-note" x-text="t('settings.privacyNote')"></p>
             <label class="switch-row">
-              <span>Guardar histórico neste computador</span>
+              <span x-text="t('settings.persistHistory')"></span>
               <input type="checkbox" x-model="persistHistory" @change="saveSettings()" />
             </label>
-            <p class="settings-note settings-note-small">Desligado: histórico some ao fechar o app.</p>
+            <p class="settings-note settings-note-small" x-text="t('settings.persistHistoryNote')"></p>
             <button class="btn-outline" @click="exportHistory()">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
-              Exportar histórico (.json/.csv)
+              <span x-text="t('settings.exportHistory')"></span>
             </button>
             <p class="settings-note settings-note-small" x-show="exportFeedback" x-cloak x-text="exportFeedback"></p>
             <button class="btn-outline danger" @click="clearHistory()">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6h16Z"/><path d="M10 11v6M14 11v6"/></svg>
-              Apagar histórico agora
+              <span x-text="t('settings.clearHistory')"></span>
             </button>
           </section>
         </div>
@@ -244,30 +252,31 @@
     <template x-if="detailEvent">
       <div>
         <div class="detail-header">
-          <h2>Bloqueio detalhado</h2>
+          <h2 x-text="t('detail.title')"></h2>
           <button class="icon-btn" @click="detailEvent = null">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
           </button>
         </div>
-        <p class="detail-message" x-text="detailEvent.plainLanguageMessage"></p>
+        <p class="detail-message" x-text="blockMessage(detailEvent)"></p>
         <dl class="detail-tech">
-          <div class="detail-row"><dt>Processo</dt><dd x-text="detailEvent.processName"></dd></div>
-          <div class="detail-row" x-show="detailEvent.pid"><dt>PID</dt><dd x-text="detailEvent.pid"></dd></div>
-          <div class="detail-row" x-show="detailEvent.localPort"><dt>Porta local</dt><dd x-text="detailEvent.localPort"></dd></div>
-          <div class="detail-row"><dt>Domínio de destino</dt><dd x-text="detailEvent.domain"></dd></div>
-          <div class="detail-row"><dt>Protocolo</dt><dd>TCP/443 (TLS, bloqueado no handshake)</dd></div>
-          <div class="detail-row"><dt>Data e hora</dt><dd x-text="formatFullTime(detailEvent.timestamp)"></dd></div>
-          <div class="detail-row"><dt>Acesso a arquivo correlacionado</dt><dd x-text="detailEvent.correlatedFileAccess ? 'Sim, nos 10s anteriores' : 'Não'"></dd></div>
-          <div class="detail-row" x-show="detailEvent.correlatedFilePath"><dt>Arquivo acessado</dt><dd class="mono" x-text="detailEvent.correlatedFilePath"></dd></div>
+          <div class="detail-row"><dt x-text="t('detail.process')"></dt><dd x-text="detailEvent.processName"></dd></div>
+          <div class="detail-row" x-show="detailEvent.pid"><dt x-text="t('detail.pid')"></dt><dd x-text="detailEvent.pid"></dd></div>
+          <div class="detail-row" x-show="detailEvent.localPort"><dt x-text="t('detail.localPort')"></dt><dd x-text="detailEvent.localPort"></dd></div>
+          <div class="detail-row"><dt x-text="t('detail.domain')"></dt><dd x-text="detailEvent.domain"></dd></div>
+          <div class="detail-row"><dt x-text="t('detail.protocol')"></dt><dd x-text="t('detail.protocolValue')"></dd></div>
+          <div class="detail-row"><dt x-text="t('detail.timestamp')"></dt><dd x-text="formatFullTime(detailEvent.timestamp)"></dd></div>
+          <div class="detail-row"><dt x-text="t('detail.correlated')"></dt><dd x-text="detailEvent.correlatedFileAccess ? t('detail.correlatedYes') : t('detail.correlatedNo')"></dd></div>
+          <div class="detail-row" x-show="detailEvent.correlatedFilePath"><dt x-text="t('detail.filePath')"></dt><dd class="mono" x-text="detailEvent.correlatedFilePath"></dd></div>
         </dl>
         <button class="allow-btn detail-allow" :class="{ done: isAllowed(detailEvent.domain, detailEvent.processName) }" :disabled="isAllowed(detailEvent.domain, detailEvent.processName)" @click="allow(detailEvent)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-          <span x-text="isAllowed(detailEvent.domain, detailEvent.processName) ? 'Permitido sempre' : 'Permitir este programa sempre'"></span>
+          <span x-text="isAllowed(detailEvent.domain, detailEvent.processName) ? t('detail.allowed') : t('detail.allow')"></span>
         </button>
       </div>
     </template>
   </div>
 
+  <script src="i18n.js"></script>
   <script src="vendor/alpine.min.js" defer></script>
   <script src="app.js"></script>
 </body>

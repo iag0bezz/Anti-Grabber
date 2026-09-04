@@ -29,6 +29,13 @@ function app() {
     notificationsSnoozedUntil: null,
     snoozeTick: 0,
 
+    language: 'pt',
+    languageOptions: [
+      { code: 'pt', label: 'Português' },
+      { code: 'en', label: 'English' },
+      { code: 'es', label: 'Español' },
+    ],
+
     detailEvent: null,
     exportFeedback: '',
 
@@ -62,6 +69,7 @@ function app() {
         this.notificationsEnabled = s.notificationsEnabled;
         this.persistHistory = s.persistHistory;
         this.notificationsSnoozedUntil = s.notificationsSnoozedUntil ?? null;
+        this.language = s.language ?? 'pt';
       });
 
       setInterval(() => { this.snoozeTick++; }, 30000);
@@ -69,11 +77,28 @@ function app() {
       this.loadFeed();
     },
 
+    t(key, vars) {
+      return window.AG_I18N.translate(this.language, key, vars);
+    },
+
+    async setLanguage(lang) {
+      this.language = lang;
+      await window.antigrabber.updateSettings({ language: lang });
+    },
+
+    blockMessage(ev) {
+      if (!ev) return '';
+      return this.t(ev.correlatedFileAccess ? 'blockMsg.correlated' : 'blockMsg.suspicious', {
+        process: ev.processName,
+        domain: ev.domain,
+      });
+    },
+
     statusLabel() {
-      if (!this.connected) return 'Não conectado';
-      if (this.statusState === 'recentBlock') return 'Bloqueio recente';
-      if (this.statusState === 'active') return 'Protegendo';
-      return 'Ocioso';
+      if (!this.connected) return this.t('status.disconnected');
+      if (this.statusState === 'recentBlock') return this.t('status.recentBlock');
+      if (this.statusState === 'active') return this.t('status.active');
+      return this.t('status.idle');
     },
 
     hasActiveFilters() {
@@ -148,10 +173,10 @@ function app() {
     },
 
     snoozeLabel() {
-      if (this.notificationsSnoozedUntil === 'indefinite') return 'até você reativar';
+      if (this.notificationsSnoozedUntil === 'indefinite') return this.t('snooze.indefiniteLabel');
       const mins = Math.max(0, Math.round((this.notificationsSnoozedUntil - Date.now()) / 60000));
-      if (mins < 60) return `${mins} min restantes`;
-      return `${Math.round(mins / 60)}h restantes`;
+      if (mins < 60) return this.t('snooze.minRemaining', { n: mins });
+      return this.t('snooze.hourRemaining', { n: Math.round(mins / 60) });
     },
 
     async snoozeFor(minutes) {
@@ -182,9 +207,9 @@ function app() {
     async exportHistory() {
       const result = await window.antigrabber.exportHistory();
       if (result.ok) {
-        this.exportFeedback = 'Exportado com sucesso.';
+        this.exportFeedback = this.t('settings.exportSuccess');
       } else if (result.reason === 'empty') {
-        this.exportFeedback = 'Nenhum bloqueio pra exportar ainda.';
+        this.exportFeedback = this.t('settings.exportEmpty');
       } else {
         this.exportFeedback = '';
         return;
@@ -192,19 +217,23 @@ function app() {
       setTimeout(() => { this.exportFeedback = ''; }, 4000);
     },
 
+    locale() {
+      return window.AG_I18N.localeTag(this.language);
+    },
+
     formatTime(iso) {
-      return new Date(iso).toLocaleString('pt-BR');
+      return new Date(iso).toLocaleString(this.locale());
     },
 
     formatRowTime(iso) {
       const d = new Date(iso);
       const sameDay = d.toDateString() === new Date().toDateString();
-      const time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-      return sameDay ? time : `${d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} ${time}`;
+      const time = d.toLocaleTimeString(this.locale(), { hour: '2-digit', minute: '2-digit' });
+      return sameDay ? time : `${d.toLocaleDateString(this.locale(), { day: '2-digit', month: '2-digit' })} ${time}`;
     },
 
     formatFullTime(iso) {
-      return new Date(iso).toLocaleString('pt-BR', {
+      return new Date(iso).toLocaleString(this.locale(), {
         dateStyle: 'full',
         timeStyle: 'medium',
       });

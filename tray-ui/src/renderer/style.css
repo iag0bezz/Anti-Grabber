@@ -533,6 +533,7 @@ body {
   transition: background-color .15s ease, color .15s ease;
 }
 .chip-btn:hover { background: var(--accent-dim); border-color: var(--accent-dim); color: var(--accent-strong); }
+.chip-btn.active { background: var(--accent); border-color: var(--accent); color: white; }
 
 .snooze-active-row {
   margin-top: 10px;
