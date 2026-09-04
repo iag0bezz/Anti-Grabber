@@ -39,6 +39,11 @@ function app() {
     detailEvent: null,
     exportFeedback: '',
 
+    appVersion: '',
+    updateAvailable: null,
+    updatePanelOpen: false,
+    updateProgress: null,
+
     init() {
       window.antigrabber.onConnectionStatus(({ connected }) => {
         this.connected = connected;
@@ -64,6 +69,16 @@ function app() {
       window.antigrabber.onRulesSnapshot((rules) => {
         this.rules = rules;
       });
+
+      window.antigrabber.onUpdateAvailable((info) => {
+        this.updateAvailable = info;
+      });
+
+      window.antigrabber.onUpdateProgress((progress) => {
+        this.updateProgress = progress;
+      });
+
+      window.antigrabber.getAppVersion().then((v) => { this.appVersion = v; });
 
       window.antigrabber.getSettings().then((s) => {
         this.notificationsEnabled = s.notificationsEnabled;
@@ -215,6 +230,35 @@ function app() {
         return;
       }
       setTimeout(() => { this.exportFeedback = ''; }, 4000);
+    },
+
+    async startUpdate() {
+      this.updateProgress = { phase: 'downloading', percent: 0 };
+      await window.antigrabber.startUpdate();
+    },
+
+    async skipUpdateVersion() {
+      if (!this.updateAvailable) return;
+      await window.antigrabber.skipUpdateVersion(this.updateAvailable.version);
+      this.updateAvailable = null;
+      this.updatePanelOpen = false;
+    },
+
+    remindUpdateLater() {
+      this.updatePanelOpen = false;
+    },
+
+    async checkForUpdateNow() {
+      await window.antigrabber.checkForUpdateNow();
+    },
+
+    updatePhaseLabel() {
+      if (!this.updateProgress) return '';
+      if (this.updateProgress.phase === 'downloading') {
+        return this.t('update.phase.downloading', { percent: this.updateProgress.percent ?? 0 });
+      }
+      if (this.updateProgress.phase === 'error') return this.t('update.phase.error');
+      return this.t('update.phase.' + this.updateProgress.phase);
     },
 
     locale() {

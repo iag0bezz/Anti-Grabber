@@ -112,6 +112,22 @@ const dict = {
     'menu.quit': 'Sair',
 
     'export.dialogTitle': 'Exportar histórico de bloqueios',
+
+    'update.pillLabel': 'Atualização disponível',
+    'update.title': 'Nova versão: {version}',
+    'update.noNotes': 'Sem notas de versão.',
+    'update.updateNow': 'Atualizar agora',
+    'update.skipVersion': 'Ignorar esta versão',
+    'update.remindLater': 'Lembrar depois',
+    'update.phase.downloading': 'Baixando... {percent}%',
+    'update.phase.verifying': 'Verificando integridade...',
+    'update.phase.extracting': 'Extraindo...',
+    'update.phase.elevating': 'Aguardando permissão de administrador...',
+    'update.phase.relaunching': 'Reiniciando o AntiGrabber...',
+    'update.phase.error': 'Falha ao atualizar. A versão atual continua funcionando normalmente.',
+    'settings.updates': 'Atualizações',
+    'settings.checkNow': 'Verificar agora',
+    'settings.currentVersion': 'Versão instalada: {version}',
   },
 
   en: {
@@ -211,6 +227,22 @@ const dict = {
     'menu.quit': 'Quit',
 
     'export.dialogTitle': 'Export block history',
+
+    'update.pillLabel': 'Update available',
+    'update.title': 'New version: {version}',
+    'update.noNotes': 'No release notes.',
+    'update.updateNow': 'Update now',
+    'update.skipVersion': 'Skip this version',
+    'update.remindLater': 'Remind me later',
+    'update.phase.downloading': 'Downloading... {percent}%',
+    'update.phase.verifying': 'Verifying integrity...',
+    'update.phase.extracting': 'Extracting...',
+    'update.phase.elevating': 'Waiting for administrator permission...',
+    'update.phase.relaunching': 'Restarting AntiGrabber...',
+    'update.phase.error': 'Update failed. The current version keeps working normally.',
+    'settings.updates': 'Updates',
+    'settings.checkNow': 'Check now',
+    'settings.currentVersion': 'Installed version: {version}',
   },
 
   es: {
@@ -310,6 +342,22 @@ const dict = {
     'menu.quit': 'Salir',
 
     'export.dialogTitle': 'Exportar historial de bloqueos',
+
+    'update.pillLabel': 'Actualización disponible',
+    'update.title': 'Nueva versión: {version}',
+    'update.noNotes': 'Sin notas de versión.',
+    'update.updateNow': 'Actualizar ahora',
+    'update.skipVersion': 'Ignorar esta versión',
+    'update.remindLater': 'Recordar después',
+    'update.phase.downloading': 'Descargando... {percent}%',
+    'update.phase.verifying': 'Verificando integridad...',
+    'update.phase.extracting': 'Extrayendo...',
+    'update.phase.elevating': 'Esperando permiso de administrador...',
+    'update.phase.relaunching': 'Reiniciando AntiGrabber...',
+    'update.phase.error': 'Falló la actualización. La versión actual sigue funcionando normalmente.',
+    'settings.updates': 'Actualizaciones',
+    'settings.checkNow': 'Verificar ahora',
+    'settings.currentVersion': 'Versión instalada: {version}',
   },
 };
 

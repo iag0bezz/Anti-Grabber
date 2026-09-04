@@ -99,6 +99,17 @@ body {
 .snooze-pill { color: var(--text-dim); }
 .snooze-pill svg { width: 12px; height: 12px; }
 
+.update-pill {
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--accent-strong);
+  background: var(--accent-dim);
+  border-color: var(--accent-dim);
+  transition: background-color .15s ease;
+}
+.update-pill:hover { background: var(--accent); color: white; }
+.update-pill svg { width: 12px; height: 12px; }
+
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--idle); position: relative; flex-shrink: 0; }
 .dot.active { background: var(--accent); }
 .dot.recentBlock { background: var(--danger); }
@@ -644,6 +655,22 @@ body {
 .detail-row dd.mono { font-family: "Cascadia Mono", "Consolas", monospace; font-size: 11px; font-weight: 500; }
 
 .detail-allow { width: 100%; justify-content: center; padding: 10px; }
+
+.update-actions { display: flex; flex-direction: column; gap: 8px; }
+
+.progress-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+  margin: 4px 0 14px;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width .2s ease;
+}
 
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }

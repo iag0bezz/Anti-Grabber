@@ -51,6 +51,10 @@ jobs:
           $version = "${{ github.ref_name }}" -replace '^v', ''
           "version=$version" >> $env:GITHUB_OUTPUT
 
+      - name: Set tray-ui package version
+        working-directory: tray-ui
+        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
+
       - name: Build installer
         shell: pwsh
         run: .\scripts\build-installer.ps1 -Configuration Release -Version "${{ steps.version.outputs.version }}"
@@ -68,3 +72,5 @@ jobs:
           files: |
             dist/installer/AntiGrabberSetup.exe
             dist/installer/AntiGrabberSetup.exe.sha256
+            dist/installer/AntiGrabberUpdate-${{ steps.version.outputs.version }}.zip
+            dist/installer/AntiGrabberUpdate-${{ steps.version.outputs.version }}.zip.sha256

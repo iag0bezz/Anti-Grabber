@@ -43,5 +43,9 @@ Copy-Item (Join-Path $src "package.json") $appDest
 Copy-Item (Join-Path $src "src") $appDest -Recurse
 Copy-Item (Join-Path $src "assets") $appDest -Recurse
 
+$scriptsDest = Join-Path $appDest "scripts"
+New-Item -ItemType Directory -Force -Path $scriptsDest | Out-Null
+Copy-Item (Join-Path $src "scripts\update-helper.ps1") $scriptsDest
+
 $sizeMb = [math]::Round((Get-ChildItem $dest -Recurse | Measure-Object Length -Sum).Sum / 1MB, 1)
 Write-Host "Tray empacotado em $dest ($sizeMb MB, runtime incluso)" -ForegroundColor Green

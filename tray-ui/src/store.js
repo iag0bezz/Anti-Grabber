@@ -12,6 +12,8 @@ const DEFAULT_SETTINGS = {
   notificationsEnabled: true,
   notificationsSnoozedUntil: null, // null = off, 'indefinite' = until re-enabled, number = epoch ms
   language: DEFAULT_LANGUAGE,
+  lastUpdateCheck: null, // epoch ms
+  skippedVersion: null, // exact "x.y.z" the user dismissed, or null
 };
 
 function userDataDir() {
