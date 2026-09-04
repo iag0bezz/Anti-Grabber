@@ -57,6 +57,7 @@ Filename: "{sys}\sc.exe"; Parameters: "description ""{#MyServiceName}"" ""Proteg
 Filename: "{sys}\sc.exe"; Parameters: "failure ""{#MyServiceName}"" reset= 86400 actions= restart/5000/restart/5000/restart/30000"; Flags: runhidden; Components: service
 Filename: "{sys}\sc.exe"; Parameters: "start ""{#MyServiceName}"""; Flags: runhidden; Components: service; StatusMsg: "Iniciando serviço..."
 Filename: "{app}\Tray\AntiGrabber.Tray.exe"; Description: "Abrir o AntiGrabber agora"; Flags: postinstall nowait skipifsilent unchecked; Components: tray
+Filename: "{app}\Tray\AntiGrabber.Tray.exe"; Flags: nowait; Components: tray; Check: WizardSilent
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/IM AntiGrabber.Tray.exe /F"; Flags: runhidden; RunOnceId: "KillTray"
@@ -67,3 +68,23 @@ Filename: "{sys}\sc.exe"; Parameters: "delete WinDivert"; Flags: runhidden; RunO
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{commonappdata}\AntiGrabber"
+
+[Code]
+// Update in-place (auto-update roda este mesmo instalador via UpdateService):
+// precisa derrubar Tray e serviço ANTES da cópia de arquivos, senão o Windows
+// não deixa sobrescrever os .exe em uso. Idempotente em instalação nova —
+// taskkill/sc stop simplesmente não acham nada pra matar.
+procedure StopRunningInstall;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM AntiGrabber.Tray.exe /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\sc.exe'), 'stop "{#MyServiceName}"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(500);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+    StopRunningInstall;
+end;
