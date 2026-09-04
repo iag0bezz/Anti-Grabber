@@ -91,6 +91,7 @@ public sealed class IpcServer : BackgroundService
         }, cts.Token);
 
         await PublishStatusAsync(_currentState);
+        await PublishRulesSnapshotAsync();
 
         try
         {
@@ -126,8 +127,46 @@ public sealed class IpcServer : BackgroundService
                     "Allowlist manual: {Process} liberado para {Domain}.",
                     envelope.AllowAlways.ProcessName, envelope.AllowAlways.Domain);
                 await PublishAsync(new IpcEnvelope { Type = IpcMessageType.AllowAlwaysAck });
+                await PublishRulesSnapshotAsync();
+                break;
+
+            case IpcMessageType.RemoveRuleCommand when envelope.RemoveRule is not null:
+                _whitelist.RemoveRule(envelope.RemoveRule.Domain, envelope.RemoveRule.ProcessName);
+                _logger.LogInformation(
+                    "Allowlist manual: exceção revogada {Process}/{Domain}.",
+                    envelope.RemoveRule.ProcessName, envelope.RemoveRule.Domain);
+                await PublishRulesSnapshotAsync();
+                break;
+
+            case IpcMessageType.SetRuleEnabledCommand when envelope.SetRuleEnabled is not null:
+                _whitelist.SetRuleEnabled(
+                    envelope.SetRuleEnabled.Domain, envelope.SetRuleEnabled.ProcessName, envelope.SetRuleEnabled.Enabled);
+                _logger.LogInformation(
+                    "Allowlist manual: exceção {Process}/{Domain} {State}.",
+                    envelope.SetRuleEnabled.ProcessName, envelope.SetRuleEnabled.Domain,
+                    envelope.SetRuleEnabled.Enabled ? "reativada" : "desativada");
+                await PublishRulesSnapshotAsync();
                 break;
         }
+    }
+
+    private Task PublishRulesSnapshotAsync()
+    {
+        var rules = _whitelist.GetUserRules()
+            .Select(r => new RuleEntryPayload
+            {
+                Domain = r.Domain,
+                ProcessName = r.ProcessName,
+                Enabled = r.Enabled,
+                CreatedAt = r.CreatedAt,
+            })
+            .ToArray();
+
+        return PublishAsync(new IpcEnvelope
+        {
+            Type = IpcMessageType.RulesSnapshot,
+            RulesSnapshot = new RulesSnapshotPayload { Rules = rules },
+        });
     }
 
     private static NamedPipeServerStream CreatePipeServer()

@@ -10,6 +10,9 @@ public enum IpcMessageType
     BlockEvent,
     AllowAlwaysCommand,
     AllowAlwaysAck,
+    RulesSnapshot,
+    RemoveRuleCommand,
+    SetRuleEnabledCommand,
 }
 
 public sealed class IpcEnvelope
@@ -25,6 +28,15 @@ public sealed class IpcEnvelope
 
     [JsonPropertyName("allowAlways")]
     public AllowAlwaysPayload? AllowAlways { get; set; }
+
+    [JsonPropertyName("rulesSnapshot")]
+    public RulesSnapshotPayload? RulesSnapshot { get; set; }
+
+    [JsonPropertyName("removeRule")]
+    public AllowAlwaysPayload? RemoveRule { get; set; }
+
+    [JsonPropertyName("setRuleEnabled")]
+    public SetRuleEnabledPayload? SetRuleEnabled { get; set; }
 }
 
 public sealed class ServiceStatusPayload
@@ -50,4 +62,24 @@ public sealed class AllowAlwaysPayload
 {
     [JsonPropertyName("domain")] public string Domain { get; set; } = "";
     [JsonPropertyName("processName")] public string ProcessName { get; set; } = "";
+}
+
+public sealed class RuleEntryPayload
+{
+    [JsonPropertyName("domain")] public string Domain { get; set; } = "";
+    [JsonPropertyName("processName")] public string ProcessName { get; set; } = "";
+    [JsonPropertyName("enabled")] public bool Enabled { get; set; }
+    [JsonPropertyName("createdAt")] public DateTimeOffset CreatedAt { get; set; }
+}
+
+public sealed class RulesSnapshotPayload
+{
+    [JsonPropertyName("rules")] public RuleEntryPayload[] Rules { get; set; } = Array.Empty<RuleEntryPayload>();
+}
+
+public sealed class SetRuleEnabledPayload
+{
+    [JsonPropertyName("domain")] public string Domain { get; set; } = "";
+    [JsonPropertyName("processName")] public string ProcessName { get; set; } = "";
+    [JsonPropertyName("enabled")] public bool Enabled { get; set; }
 }

@@ -7,11 +7,25 @@ public sealed record WhitelistEntry(
     [property: JsonPropertyName("domain")] string Domain,
     [property: JsonPropertyName("allowedProcessNames")] string[] AllowedProcessNames);
 
+public sealed record AllowRule(
+    [property: JsonPropertyName("domain")] string Domain,
+    [property: JsonPropertyName("processName")] string ProcessName,
+    [property: JsonPropertyName("enabled")] bool Enabled,
+    [property: JsonPropertyName("createdAt")] DateTimeOffset CreatedAt,
+    [property: JsonPropertyName("source")] string Source = "user");
+
+internal sealed class WhitelistFile
+{
+    [JsonPropertyName("rules")] public List<AllowRule> Rules { get; set; } = new();
+    [JsonPropertyName("sensitiveDomains")] public List<string> SensitiveDomains { get; set; } = new();
+}
+
 public sealed class DomainWhitelistStore
 {
     private readonly object _lock = new();
     private Dictionary<string, HashSet<string>> _catalogEntries = new(StringComparer.OrdinalIgnoreCase);
-    private Dictionary<string, HashSet<string>> _ruleEntries = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, AllowRule> _ruleEntries = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> _sensitiveDomains = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _filePath;
 
     public DomainWhitelistStore(string filePath)
@@ -25,13 +39,23 @@ public sealed class DomainWhitelistStore
         lock (_lock)
         {
             _ruleEntries = new(StringComparer.OrdinalIgnoreCase);
+            _sensitiveDomains = new(StringComparer.OrdinalIgnoreCase);
             if (!File.Exists(_filePath)) return;
 
-            var json = File.ReadAllText(_filePath);
-            var entries = JsonSerializer.Deserialize<List<WhitelistEntry>>(json) ?? new();
-            foreach (var entry in entries)
+            try
             {
-                AddInternal(_ruleEntries, entry.Domain, entry.AllowedProcessNames);
+                var json = File.ReadAllText(_filePath);
+                var file = JsonSerializer.Deserialize<WhitelistFile>(json);
+                if (file is null) return;
+
+                foreach (var rule in file.Rules)
+                    _ruleEntries[RuleKey(rule.Domain, rule.ProcessName)] = rule;
+                foreach (var domain in file.SensitiveDomains)
+                    _sensitiveDomains.Add(domain);
+            }
+            catch (JsonException)
+            {
+                // arquivo corrompido ou de formato antigo incompatível — começa vazio, não derruba o serviço.
             }
         }
     }
@@ -40,12 +64,14 @@ public sealed class DomainWhitelistStore
     {
         lock (_lock)
         {
-            var entries = _ruleEntries
-                .Select(kv => new WhitelistEntry(kv.Key, kv.Value.ToArray()))
-                .ToList();
+            var file = new WhitelistFile
+            {
+                Rules = _ruleEntries.Values.ToList(),
+                SensitiveDomains = _sensitiveDomains.ToList(),
+            };
             var dir = Path.GetDirectoryName(_filePath);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            var json = JsonSerializer.Serialize(entries, new JsonSerializerOptions { WriteIndented = true });
+            var json = JsonSerializer.Serialize(file, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(_filePath, json);
         }
     }
@@ -59,19 +85,52 @@ public sealed class DomainWhitelistStore
             {
                 foreach (var domain in app.AllowedDomains)
                 {
-                    AddInternal(_catalogEntries, domain, app.ProcessNames);
+                    AddCatalog(domain, app.ProcessNames);
                 }
             }
         }
     }
 
-    public void AllowAlways(string domain, string processName)
+    public void AllowAlways(string domain, string processName, string source = "user")
     {
         lock (_lock)
         {
-            AddInternal(_ruleEntries, domain, new[] { processName });
+            var key = RuleKey(domain, processName);
+            var createdAt = _ruleEntries.TryGetValue(key, out var existing) ? existing.CreatedAt : DateTimeOffset.UtcNow;
+            _ruleEntries[key] = new AllowRule(domain, processName, true, createdAt, source);
         }
         Save();
+    }
+
+    public void RemoveRule(string domain, string processName)
+    {
+        lock (_lock)
+        {
+            _ruleEntries.Remove(RuleKey(domain, processName));
+        }
+        Save();
+    }
+
+    public void SetRuleEnabled(string domain, string processName, bool enabled)
+    {
+        lock (_lock)
+        {
+            var key = RuleKey(domain, processName);
+            if (_ruleEntries.TryGetValue(key, out var existing))
+                _ruleEntries[key] = existing with { Enabled = enabled };
+        }
+        Save();
+    }
+
+    public IReadOnlyList<AllowRule> GetUserRules()
+    {
+        lock (_lock)
+        {
+            return _ruleEntries.Values
+                .Where(r => r.Source == "user")
+                .OrderByDescending(r => r.CreatedAt)
+                .ToList();
+        }
     }
 
     public void MergeDownloadedRules(IEnumerable<WhitelistEntry> entries)
@@ -79,7 +138,20 @@ public sealed class DomainWhitelistStore
         lock (_lock)
         {
             foreach (var entry in entries)
-                AddInternal(_ruleEntries, entry.Domain, entry.AllowedProcessNames);
+            {
+                if (entry.AllowedProcessNames.Length == 0)
+                {
+                    _sensitiveDomains.Add(entry.Domain);
+                    continue;
+                }
+
+                foreach (var processName in entry.AllowedProcessNames)
+                {
+                    var key = RuleKey(entry.Domain, processName);
+                    var createdAt = _ruleEntries.TryGetValue(key, out var existing) ? existing.CreatedAt : DateTimeOffset.UtcNow;
+                    _ruleEntries[key] = new AllowRule(entry.Domain, processName, true, createdAt, "feed");
+                }
+            }
         }
         Save();
     }
@@ -89,13 +161,16 @@ public sealed class DomainWhitelistStore
         lock (_lock)
         {
             domain = StripPort(domain);
-            foreach (var dict in new[] { _catalogEntries, _ruleEntries })
+            foreach (var (knownDomain, processes) in _catalogEntries)
             {
-                foreach (var (knownDomain, processes) in dict)
-                {
-                    if (!MatchesDomain(domain, knownDomain)) continue;
-                    if (processes.Contains(processName, StringComparer.OrdinalIgnoreCase)) return true;
-                }
+                if (MatchesDomain(domain, knownDomain) && processes.Contains(processName, StringComparer.OrdinalIgnoreCase))
+                    return true;
+            }
+            foreach (var rule in _ruleEntries.Values)
+            {
+                if (!rule.Enabled) continue;
+                if (MatchesDomain(domain, rule.Domain) && string.Equals(rule.ProcessName, processName, StringComparison.OrdinalIgnoreCase))
+                    return true;
             }
             return false;
         }
@@ -107,7 +182,8 @@ public sealed class DomainWhitelistStore
         {
             domain = StripPort(domain);
             return _catalogEntries.Keys.Any(known => MatchesDomain(domain, known))
-                || _ruleEntries.Keys.Any(known => MatchesDomain(domain, known));
+                || _ruleEntries.Values.Any(r => MatchesDomain(domain, r.Domain))
+                || _sensitiveDomains.Any(known => MatchesDomain(domain, known));
         }
     }
 
@@ -121,12 +197,14 @@ public sealed class DomainWhitelistStore
         return idx < 0 ? domain : domain[..idx];
     }
 
-    private static void AddInternal(Dictionary<string, HashSet<string>> dict, string domain, IEnumerable<string> processNames)
+    private static string RuleKey(string domain, string processName) => $"{domain}|{processName}";
+
+    private void AddCatalog(string domain, IEnumerable<string> processNames)
     {
-        if (!dict.TryGetValue(domain, out var set))
+        if (!_catalogEntries.TryGetValue(domain, out var set))
         {
             set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            dict[domain] = set;
+            _catalogEntries[domain] = set;
         }
         foreach (var p in processNames) set.Add(p);
     }
