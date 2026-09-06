@@ -415,6 +415,8 @@ public sealed class TrayForm : Form
         if (patch.TryGetProperty("language", out var lang) && lang.ValueKind == JsonValueKind.String) s.Language = lang.GetString()!;
         if (patch.TryGetProperty("lastUpdateCheck", out var luc)) s.LastUpdateCheck = luc.ValueKind == JsonValueKind.Null ? null : luc.GetInt64();
         if (patch.TryGetProperty("skippedVersion", out var sv)) s.SkippedVersion = sv.ValueKind == JsonValueKind.Null ? null : sv.GetString();
+        if (patch.TryGetProperty("muteWhenFullscreen", out var mf)) s.MuteWhenFullscreen = mf.GetBoolean();
+        if (patch.TryGetProperty("updateChannel", out var uc) && uc.ValueKind == JsonValueKind.String) s.UpdateChannel = uc.GetString()!;
     }
 
     private void RunOnUi(Action action)

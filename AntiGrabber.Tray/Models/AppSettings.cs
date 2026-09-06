@@ -15,6 +15,8 @@ public sealed class AppSettings
     [JsonPropertyName("language")] public string Language { get; set; } = "pt";
     [JsonPropertyName("lastUpdateCheck")] public long? LastUpdateCheck { get; set; }
     [JsonPropertyName("skippedVersion")] public string? SkippedVersion { get; set; }
+    [JsonPropertyName("muteWhenFullscreen")] public bool MuteWhenFullscreen { get; set; } = true;
+    [JsonPropertyName("updateChannel")] public string UpdateChannel { get; set; } = "stable";
 
     public bool IsNotificationsSnoozed()
     {
