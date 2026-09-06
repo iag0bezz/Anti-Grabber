@@ -28,6 +28,7 @@ const dict = {
     'nav.exceptions': 'Exceções',
     'nav.settings': 'Config',
     'nav.settingsFull': 'Configurações',
+    'nav.stats': 'Estatísticas',
     'rail.blocks24hTitle': 'Bloqueios nas últimas 24h',
 
     'feed.searchPlaceholder': 'Buscar por domínio ou programa...',
@@ -148,6 +149,12 @@ const dict = {
     'settings.exportConfigSuccess': 'Configuração exportada.',
     'settings.importConfigSuccess': 'Configuração importada.',
     'settings.importConfigError': 'Arquivo inválido.',
+
+    'stats.totalLabel': 'Bloqueios no total',
+    'stats.dailyTitle': 'Bloqueios por dia (14 dias)',
+    'stats.topProcesses': 'Programas mais bloqueados',
+    'stats.topDomains': 'Domínios mais bloqueados',
+    'stats.noData': 'Sem dados suficientes ainda.',
   },
 
   en: {
@@ -163,6 +170,7 @@ const dict = {
     'nav.exceptions': 'Exceptions',
     'nav.settings': 'Settings',
     'nav.settingsFull': 'Settings',
+    'nav.stats': 'Stats',
     'rail.blocks24hTitle': 'Blocks in the last 24h',
 
     'feed.searchPlaceholder': 'Search by domain or program...',
@@ -283,6 +291,12 @@ const dict = {
     'settings.exportConfigSuccess': 'Configuration exported.',
     'settings.importConfigSuccess': 'Configuration imported.',
     'settings.importConfigError': 'Invalid file.',
+
+    'stats.totalLabel': 'Total blocks',
+    'stats.dailyTitle': 'Blocks per day (14 days)',
+    'stats.topProcesses': 'Most blocked programs',
+    'stats.topDomains': 'Most blocked domains',
+    'stats.noData': 'Not enough data yet.',
   },
 
   es: {
@@ -298,6 +312,7 @@ const dict = {
     'nav.exceptions': 'Excepciones',
     'nav.settings': 'Config',
     'nav.settingsFull': 'Configuración',
+    'nav.stats': 'Estadísticas',
     'rail.blocks24hTitle': 'Bloqueos en las últimas 24h',
 
     'feed.searchPlaceholder': 'Buscar por dominio o programa...',
@@ -418,6 +433,12 @@ const dict = {
     'settings.exportConfigSuccess': 'Configuración exportada.',
     'settings.importConfigSuccess': 'Configuración importada.',
     'settings.importConfigError': 'Archivo inválido.',
+
+    'stats.totalLabel': 'Bloqueos totales',
+    'stats.dailyTitle': 'Bloqueos por día (14 días)',
+    'stats.topProcesses': 'Programas más bloqueados',
+    'stats.topDomains': 'Dominios más bloqueados',
+    'stats.noData': 'Todavía no hay suficientes datos.',
   },
 };
 

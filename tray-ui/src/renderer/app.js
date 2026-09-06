@@ -33,6 +33,8 @@ function app() {
     updateChannel: 'stable',
     configFeedback: '',
 
+    stats: null,
+
     language: 'pt',
     languageOptions: [
       { code: 'pt', label: 'Português' },
@@ -191,6 +193,20 @@ function app() {
     async setUpdateChannel(channel) {
       this.updateChannel = channel;
       await window.antigrabber.updateSettings({ updateChannel: channel });
+    },
+
+    async loadStats() {
+      this.stats = await window.antigrabber.getStats(14);
+    },
+
+    maxDailyCount() {
+      if (!this.stats || !this.stats.daily.length) return 1;
+      return Math.max(1, ...this.stats.daily.map((d) => d.count));
+    },
+
+    formatStatDay(dateStr) {
+      const d = new Date(dateStr + 'T00:00:00');
+      return d.toLocaleDateString(this.locale(), { day: '2-digit', month: '2-digit' });
     },
 
     async exportConfig() {

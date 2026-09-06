@@ -17,6 +17,14 @@ public sealed record EventQueryResult(
     int PageSize,
     int TotalPages);
 
+public sealed record DailyBlockCount(string Date, int Count);
+public sealed record TopCount(string Key, int Count);
+public sealed record BlockStats(
+    IReadOnlyList<DailyBlockCount> Daily,
+    IReadOnlyList<TopCount> TopProcesses,
+    IReadOnlyList<TopCount> TopDomains,
+    int Total);
+
 // Porta store.js pra C# 1:1: mesmo formato de settings.json/events.json, mesmo
 // limite de 1000 eventos, engole erro de I/O em silêncio (mesmo comportamento
 // do original — perder um write de settings não pode derrubar o app).
@@ -177,6 +185,32 @@ public sealed class Store
 
             return new EventQueryResult(
                 list.Skip(start).Take(pageSize).ToList(), total, page, pageSize, totalPages);
+        }
+    }
+
+    public BlockStats GetStats(int days = 14)
+    {
+        lock (_lock)
+        {
+            var today = DateTimeOffset.UtcNow.Date;
+            var daily = new List<DailyBlockCount>();
+            for (var i = days - 1; i >= 0; i--)
+            {
+                var day = today.AddDays(-i);
+                var count = _events.Count(e => e.Timestamp.UtcDateTime.Date == day);
+                daily.Add(new DailyBlockCount(day.ToString("yyyy-MM-dd"), count));
+            }
+
+            var topProcesses = _events
+                .GroupBy(e => e.ProcessName, StringComparer.OrdinalIgnoreCase)
+                .Select(g => new TopCount(g.Key, g.Count()))
+                .OrderByDescending(t => t.Count).Take(5).ToList();
+            var topDomains = _events
+                .GroupBy(e => e.Domain, StringComparer.OrdinalIgnoreCase)
+                .Select(g => new TopCount(g.Key, g.Count()))
+                .OrderByDescending(t => t.Count).Take(5).ToList();
+
+            return new BlockStats(daily, topProcesses, topDomains, _events.Count);
         }
     }
 }

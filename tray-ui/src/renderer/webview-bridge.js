@@ -67,6 +67,7 @@
     updateSettings: (partial) => call('update-settings', partial),
     openLogsFolder: () => call('open-logs-folder'),
 
+    getStats: (days) => call('get-stats', { days }),
     exportConfig: () => call('export-config'),
     importConfig: () => call('import-config'),
 

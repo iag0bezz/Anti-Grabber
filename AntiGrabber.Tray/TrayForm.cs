@@ -368,6 +368,13 @@ public sealed class TrayForm : Form
             return Task.FromResult<object?>(new { ok = true, filePath = dialog.FileName });
         });
 
+        bridge.On("get-stats", args =>
+        {
+            var days = args.ValueKind == JsonValueKind.Object && args.TryGetProperty("days", out var d) && d.ValueKind == JsonValueKind.Number
+                ? d.GetInt32() : 14;
+            return Task.FromResult<object?>(_store.GetStats(days));
+        });
+
         bridge.On("export-config", _ =>
         {
             var lang = _store.GetSettings().Language;
