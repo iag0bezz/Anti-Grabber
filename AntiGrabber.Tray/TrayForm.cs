@@ -25,6 +25,8 @@ public sealed class TrayForm : Form
     private Bridge? _bridge;
     private string _trayState = "idle";
     private int _unseenBlockCount;
+    private ServiceStatusPayload? _lastStatus;
+    private RuleEntryPayload[]? _lastRules;
 
     public TrayForm()
     {
@@ -108,7 +110,12 @@ public sealed class TrayForm : Form
         // mesma solução que o main.js original usava no evento did-finish-load.
         _webView.CoreWebView2.NavigationCompleted += (_, e) =>
         {
-            if (e.IsSuccess) _bridge?.Send("connection-status", new { connected = _pipe.IsConnected });
+            if (e.IsSuccess)
+            {
+                _bridge?.Send("connection-status", new { connected = _pipe.IsConnected });
+                if (_lastStatus is { } status) _bridge?.Send("status", status);
+                if (_lastRules is { } rules) _bridge?.Send("rules-snapshot", rules);
+            }
             if (Environment.GetEnvironmentVariable("AG_DEBUG_SHOW") is not null)
                 DebugLog($"NavigationCompleted success={e.IsSuccess} status={e.WebErrorStatus}");
         };
@@ -183,12 +190,14 @@ public sealed class TrayForm : Form
             switch (envelope.Type)
             {
                 case IpcMessageType.Status:
+                    _lastStatus = envelope.Status;
                     _bridge?.Send("status", envelope.Status);
                     SetTrayState(envelope.Status?.State == "recentBlock" ? "block" : "active");
                     break;
 
                 case IpcMessageType.RulesSnapshot:
-                    _bridge?.Send("rules-snapshot", envelope.RulesSnapshot?.Rules ?? Array.Empty<RuleEntryPayload>());
+                    _lastRules = envelope.RulesSnapshot?.Rules ?? Array.Empty<RuleEntryPayload>();
+                    _bridge?.Send("rules-snapshot", _lastRules);
                     break;
 
                 case IpcMessageType.BlockEvent when envelope.BlockEvent is { } payload:
