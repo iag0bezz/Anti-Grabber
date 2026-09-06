@@ -22,17 +22,28 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>
+  /* aplica tema antes do primeiro paint pra não piscar claro->escuro.
+     1ª visita sem preferência salva: segue o SO. Depois disso, só o toggle manda. */
+  (function(){
+    try{
+      var saved = localStorage.getItem('ag_theme');
+      var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', theme);
+    }catch(e){}
+  })();
+</script>
 <style>
 
-  /* ---------- tokens (mesma paleta do app: light por padrão, dark via SO) ---------- */
+  /* ---------- tokens (light neutro por padrão; dark só via toggle próprio, não pelo SO) ---------- */
   :root{
-    --bg:#f2f7f4;
-    --bg-alt:#e9f1ec;
+    --bg:#ffffff;
+    --bg-alt:#f7f8f8;
     --surface:#ffffff;
-    --surface-2:#eaf6ee;
-    --border:#dce8e1;
-    --text:#14231a;
-    --text-dim:#5b6b62;
+    --surface-2:#f4f5f5;
+    --border:#e6e8e7;
+    --text:#161a18;
+    --text-dim:#5f6864;
     --accent:#1f9d55;
     --accent-strong:#16803f;
     --accent-dim:#e3f6ea;
@@ -40,8 +51,8 @@
     --danger-dim:#fbe9e9;
     --idle:#9aa39d;
     --idle-dim:#eceeed;
-    --shadow:0 1px 2px rgba(20,40,25,.05), 0 18px 40px -12px rgba(20,40,25,.14);
-    --shadow-sm:0 1px 2px rgba(20,40,25,.06), 0 6px 16px -6px rgba(20,40,25,.1);
+    --shadow:0 1px 2px rgba(20,30,25,.05), 0 18px 40px -12px rgba(20,30,25,.14);
+    --shadow-sm:0 1px 2px rgba(20,30,25,.06), 0 6px 16px -6px rgba(20,30,25,.1);
     --radius-lg:22px;
     --radius:14px;
     --radius-sm:10px;
@@ -50,8 +61,10 @@
     --font-mono:'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
     color-scheme: light;
   }
-  @media (prefers-color-scheme: dark){
-    :root{
+  /* ativado via data-theme="dark" no <html> (toggle.js), não por prefers-color-scheme —
+     site fica claro por padrão mesmo com SO em dark; só entra em dark se o usuário
+     escolher ou (1ª visita, sem preferência salva) se o SO já estiver em dark. */
+  :root[data-theme="dark"]{
       --bg:#0f1712;
       --bg-alt:#0b120e;
       --surface:#16211b;
@@ -69,7 +82,6 @@
       --shadow:0 1px 2px rgba(0,0,0,.3), 0 18px 44px -14px rgba(0,0,0,.55);
       --shadow-sm:0 1px 2px rgba(0,0,0,.3), 0 8px 20px -8px rgba(0,0,0,.45);
       color-scheme: dark;
-    }
   }
 
   *{box-sizing:border-box}
@@ -133,6 +145,13 @@
   @media(max-width:400px){.lang-btn{padding:5px 6px;font-size:10.5px}}
   .lang-btn:hover{color:var(--text)}
   .lang-btn.active{background:var(--surface);color:var(--accent-strong);box-shadow:var(--shadow-sm)}
+
+  .theme-toggle{display:flex;align-items:center;justify-content:center;width:34px;height:34px;flex-shrink:0;background:var(--surface-2);border:1px solid var(--border);border-radius:9px;cursor:pointer;color:var(--text-dim);transition:background-color .15s ease,color .15s ease}
+  .theme-toggle:hover{color:var(--text)}
+  .theme-toggle svg{width:16px;height:16px}
+  .theme-toggle .icon-moon{display:none}
+  :root[data-theme="dark"] .theme-toggle .icon-sun{display:none}
+  :root[data-theme="dark"] .theme-toggle .icon-moon{display:block}
 
   .btn{
     display:inline-flex;align-items:center;gap:9px;
@@ -439,6 +458,10 @@
           <button class="lang-btn" data-lang="en" type="button">EN</button>
           <button class="lang-btn" data-lang="es" type="button">ES</button>
         </div>
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Alternar tema claro/escuro">
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
+        </button>
         <a class="btn btn-primary btn-sm" href="https://github.com/iag0bezz/Anti-Grabber/releases/latest/download/AntiGrabberSetup.exe">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
           <span data-i18n="nav.download">Baixar</span>
@@ -988,6 +1011,16 @@
   var savedLang = 'pt';
   try{ savedLang = localStorage.getItem('ag_lang') || 'pt'; }catch(e){}
   if(savedLang !== 'pt' && (savedLang === 'en' || savedLang === 'es')) applyLang(savedLang);
+
+  /* tema: toggle manual, persistido; estado inicial já setado no <head> antes do paint */
+  var themeToggle = document.getElementById('theme-toggle');
+  if(themeToggle){
+    themeToggle.addEventListener('click', function(){
+      var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try{ localStorage.setItem('ag_theme', next); }catch(e){}
+    });
+  }
 
   /* versão mais recente via GitHub API */
   fetch('https://api.github.com/repos/iag0bezz/Anti-Grabber/releases/latest')
