@@ -79,8 +79,11 @@
   // Arraste da janela sem moldura: -webkit-app-region:drag não existe no
   // WebView2 puro. No mousedown na titlebar, avisa o host, que entrega o
   // arraste pro próprio Windows (ReleaseCapture + WM_NCLBUTTONDOWN/HTCAPTION).
+  // Escuta na .titlebar inteira (não só no grupo logo+status) pra qualquer
+  // ponto vazio do topo arrastar também; botões/inputs continuam excluídos
+  // pelo closest() abaixo.
   document.addEventListener('DOMContentLoaded', () => {
-    const dragEl = document.querySelector('.titlebar-drag');
+    const dragEl = document.querySelector('.titlebar');
     if (!dragEl) return;
     dragEl.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
