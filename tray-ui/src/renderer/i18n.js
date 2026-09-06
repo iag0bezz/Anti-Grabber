@@ -137,6 +137,9 @@ const dict = {
     'settings.updates': 'Atualizações',
     'settings.checkNow': 'Verificar agora',
     'settings.currentVersion': 'Versão instalada: {version}',
+    'settings.updateChannel': 'Canal de atualização',
+    'settings.channelStable': 'Estável',
+    'settings.channelBeta': 'Beta',
   },
 
   en: {
@@ -261,6 +264,9 @@ const dict = {
     'settings.updates': 'Updates',
     'settings.checkNow': 'Check now',
     'settings.currentVersion': 'Installed version: {version}',
+    'settings.updateChannel': 'Update channel',
+    'settings.channelStable': 'Stable',
+    'settings.channelBeta': 'Beta',
   },
 
   es: {
@@ -385,6 +391,9 @@ const dict = {
     'settings.updates': 'Actualizaciones',
     'settings.checkNow': 'Verificar ahora',
     'settings.currentVersion': 'Versión instalada: {version}',
+    'settings.updateChannel': 'Canal de actualización',
+    'settings.channelStable': 'Estable',
+    'settings.channelBeta': 'Beta',
   },
 };
 

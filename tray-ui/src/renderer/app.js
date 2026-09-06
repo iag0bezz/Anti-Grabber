@@ -30,6 +30,8 @@ function app() {
     notificationsSnoozedUntil: null,
     snoozeTick: 0,
 
+    updateChannel: 'stable',
+
     language: 'pt',
     languageOptions: [
       { code: 'pt', label: 'Português' },
@@ -88,6 +90,7 @@ function app() {
         this.muteWhenFullscreen = s.muteWhenFullscreen ?? true;
         this.notificationsSnoozedUntil = s.notificationsSnoozedUntil ?? null;
         this.language = s.language ?? 'pt';
+        this.updateChannel = s.updateChannel ?? 'stable';
       });
 
       setInterval(() => { this.snoozeTick++; }, 30000);
@@ -182,6 +185,11 @@ function app() {
         persistHistory: this.persistHistory,
         muteWhenFullscreen: this.muteWhenFullscreen,
       });
+    },
+
+    async setUpdateChannel(channel) {
+      this.updateChannel = channel;
+      await window.antigrabber.updateSettings({ updateChannel: channel });
     },
 
     snoozeActive() {

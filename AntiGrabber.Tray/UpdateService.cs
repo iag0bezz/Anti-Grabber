@@ -33,9 +33,19 @@ public sealed class UpdateService
     {
         try
         {
-            var json = await _http.GetStringAsync($"https://api.github.com/repos/{GitHubRepo}/releases/latest");
+            // Canal "beta" pega o release mais recente da lista completa (inclui pre-release);
+            // "stable" usa /releases/latest, que o GitHub já filtra pra excluir pre-release.
+            var beta = _store.GetSettings().UpdateChannel == "beta";
+            var json = beta
+                ? await _http.GetStringAsync($"https://api.github.com/repos/{GitHubRepo}/releases")
+                : await _http.GetStringAsync($"https://api.github.com/repos/{GitHubRepo}/releases/latest");
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
+            if (beta)
+            {
+                if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() == 0) return;
+                root = root[0];
+            }
             var remoteVersion = (root.TryGetProperty("tag_name", out var tag) ? tag.GetString() : null)?.TrimStart('v') ?? "";
             if (remoteVersion.Length == 0) return;
 
