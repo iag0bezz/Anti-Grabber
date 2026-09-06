@@ -43,6 +43,7 @@ function app() {
     updateAvailable: null,
     updatePanelOpen: false,
     updateProgress: null,
+    updateSteps: ['downloading', 'verifying', 'installing', 'relaunching'],
 
     init() {
       window.antigrabber.onConnectionStatus(({ connected }) => {
@@ -259,6 +260,26 @@ function app() {
       }
       if (this.updateProgress.phase === 'error') return this.t('update.phase.error');
       return this.t('update.phase.' + this.updateProgress.phase);
+    },
+
+    updateStepState(step) {
+      if (!this.updateProgress) return 'pending';
+      const idx = this.updateSteps.indexOf(step);
+      const curIdx = this.updateSteps.indexOf(this.updateProgress.phase);
+      if (curIdx === -1) return 'pending';
+      if (idx < curIdx) return 'done';
+      if (idx === curIdx) return 'active';
+      return 'pending';
+    },
+
+    updatePhaseDescription() {
+      if (!this.updateProgress || this.updateProgress.phase === 'error') return '';
+      return this.t('update.desc.' + this.updateProgress.phase);
+    },
+
+    dismissUpdateError() {
+      this.updateProgress = null;
+      this.updatePanelOpen = false;
     },
 
     locale() {

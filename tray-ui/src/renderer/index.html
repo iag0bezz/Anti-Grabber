@@ -286,33 +286,61 @@
   </div>
 
   <div class="detail-backdrop" x-show="updatePanelOpen" x-transition.opacity.duration.150ms @click="!updateProgress && (updatePanelOpen = false)" x-cloak></div>
-  <div class="detail-modal update-modal" x-show="updatePanelOpen" x-transition.duration.150ms x-cloak>
+  <div class="detail-modal update-modal" :class="{ 'update-modal-progress': updateProgress }" x-show="updatePanelOpen" x-transition.duration.150ms x-cloak>
     <template x-if="updateAvailable">
       <div>
-        <div class="detail-header">
-          <h2 x-text="t('update.title', { version: updateAvailable.version })"></h2>
-          <button class="icon-btn" x-show="!updateProgress" @click="updatePanelOpen = false">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
-          </button>
-        </div>
-
-        <p class="detail-message" x-show="!updateProgress" x-cloak x-text="updateAvailable.notes || t('update.noNotes')"></p>
-
-        <div x-show="updateProgress" x-cloak>
-          <p class="settings-note" x-text="updatePhaseLabel()"></p>
-          <div class="progress-bar" x-show="updateProgress && updateProgress.phase === 'downloading'" x-cloak>
-            <div class="progress-bar-fill" :style="'width:' + (updateProgress ? (updateProgress.percent ?? 0) : 0) + '%'"></div>
+        <template x-if="!updateProgress">
+          <div>
+            <div class="detail-header">
+              <h2 x-text="t('update.title', { version: updateAvailable.version })"></h2>
+              <button class="icon-btn" @click="updatePanelOpen = false">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <p class="detail-message" x-text="updateAvailable.notes || t('update.noNotes')"></p>
+            <div class="update-actions">
+              <button class="allow-btn detail-allow" @click="startUpdate()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+                <span x-text="t('update.updateNow')"></span>
+              </button>
+              <button class="btn-outline small" @click="skipUpdateVersion()" x-text="t('update.skipVersion')"></button>
+              <button class="btn-outline small" @click="remindUpdateLater()" x-text="t('update.remindLater')"></button>
+            </div>
           </div>
-        </div>
+        </template>
 
-        <div class="update-actions" x-show="!updateProgress" x-cloak>
-          <button class="allow-btn detail-allow" @click="startUpdate()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
-            <span x-text="t('update.updateNow')"></span>
-          </button>
-          <button class="btn-outline small" @click="skipUpdateVersion()" x-text="t('update.skipVersion')"></button>
-          <button class="btn-outline small" @click="remindUpdateLater()" x-text="t('update.remindLater')"></button>
-        </div>
+        <template x-if="updateProgress">
+          <div class="update-progress-view">
+            <div class="update-stage-icon" :class="{ spin: updateProgress.phase !== 'error', 'is-error': updateProgress.phase === 'error' }">
+              <svg x-show="updateProgress.phase === 'error'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <svg x-show="updateProgress.phase !== 'error'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+            </div>
+
+            <p class="update-phase-title" x-text="updatePhaseLabel()"></p>
+            <p class="update-phase-desc" x-text="updatePhaseDescription()"></p>
+
+            <div class="progress-bar" x-show="updateProgress.phase === 'downloading'" x-cloak>
+              <div class="progress-bar-fill" :style="'width:' + (updateProgress.percent ?? 0) + '%'"></div>
+            </div>
+
+            <ul class="update-steps" x-show="updateProgress.phase !== 'error'" x-cloak>
+              <template x-for="step in updateSteps" :key="step">
+                <li class="update-step" :class="updateStepState(step)">
+                  <span class="update-step-dot">
+                    <svg x-show="updateStepState(step) === 'done'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                    <svg class="step-spinner" x-show="updateStepState(step) === 'active'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/></svg>
+                  </span>
+                  <span x-text="t('update.step.' + step)"></span>
+                </li>
+              </template>
+            </ul>
+
+            <div class="update-error-box" x-show="updateProgress.phase === 'error'" x-cloak x-text="updateProgress.message || t('update.phase.error')"></div>
+            <div class="update-actions" x-show="updateProgress.phase === 'error'" x-cloak style="margin-top: 16px; width: 100%;">
+              <button class="btn-outline small" @click="dismissUpdateError()" x-text="t('update.dismiss')"></button>
+            </div>
+          </div>
+        </template>
       </div>
     </template>
   </div>
