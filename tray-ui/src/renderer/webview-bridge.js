@@ -67,6 +67,9 @@
     updateSettings: (partial) => call('update-settings', partial),
     openLogsFolder: () => call('open-logs-folder'),
 
+    exportConfig: () => call('export-config'),
+    importConfig: () => call('import-config'),
+
     getAppVersion: () => call('get-app-version'),
     checkForUpdateNow: () => call('check-for-update-now'),
     startUpdate: () => call('start-update'),

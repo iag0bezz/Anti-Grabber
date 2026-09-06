@@ -368,6 +368,80 @@ public sealed class TrayForm : Form
             return Task.FromResult<object?>(new { ok = true, filePath = dialog.FileName });
         });
 
+        bridge.On("export-config", _ =>
+        {
+            var lang = _store.GetSettings().Language;
+            using var dialog = new SaveFileDialog
+            {
+                Title = HostStrings.T(lang, "export.configDialogTitle"),
+                FileName = "antigrabber-config.json",
+                Filter = "JSON (*.json)|*.json",
+            };
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+                return Task.FromResult<object?>(new { ok = false, reason = "canceled" });
+
+            var payload = new
+            {
+                formatVersion = 1,
+                settings = _store.GetSettings(),
+                rules = _lastRules ?? Array.Empty<RuleEntryPayload>(),
+            };
+            File.WriteAllText(dialog.FileName, JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+            return Task.FromResult<object?>(new { ok = true });
+        });
+
+        bridge.On("import-config", async _ =>
+        {
+            var lang = _store.GetSettings().Language;
+            using var dialog = new OpenFileDialog
+            {
+                Title = HostStrings.T(lang, "import.configDialogTitle"),
+                Filter = "JSON (*.json)|*.json",
+            };
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+                return new { ok = false, reason = "canceled" };
+
+            try
+            {
+                var json = await File.ReadAllTextAsync(dialog.FileName);
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+
+                if (root.TryGetProperty("settings", out var settingsEl))
+                    _store.UpdateSettings(s => ApplySettingsPatch(s, settingsEl));
+
+                if (root.TryGetProperty("rules", out var rulesEl) && rulesEl.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var ruleEl in rulesEl.EnumerateArray())
+                    {
+                        var (domain, processName) = ReadDomainProcess(ruleEl);
+                        if (domain.Length == 0 || processName.Length == 0) continue;
+                        var enabled = !ruleEl.TryGetProperty("enabled", out var en) || en.ValueKind != JsonValueKind.False;
+
+                        await _pipe.SendAsync(new IpcEnvelope
+                        {
+                            Type = IpcMessageType.AllowAlwaysCommand,
+                            AllowAlways = new AllowAlwaysPayload { Domain = domain, ProcessName = processName },
+                        });
+                        if (!enabled)
+                            await _pipe.SendAsync(new IpcEnvelope
+                            {
+                                Type = IpcMessageType.SetRuleEnabledCommand,
+                                SetRuleEnabled = new SetRuleEnabledPayload { Domain = domain, ProcessName = processName, Enabled = false },
+                            });
+                    }
+                }
+
+                SetupTrayMenu();
+                RefreshTrayIcon();
+                return new { ok = true, settings = (object)_store.GetSettings() };
+            }
+            catch
+            {
+                return new { ok = false, reason = "invalid" };
+            }
+        });
+
         bridge.On("open-logs-folder", _ =>
         {
             var logsDir = Path.Combine(Environment.GetEnvironmentVariable("ProgramData") ?? @"C:\ProgramData", "AntiGrabber", "logs");

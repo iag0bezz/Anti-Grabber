@@ -31,6 +31,7 @@ function app() {
     snoozeTick: 0,
 
     updateChannel: 'stable',
+    configFeedback: '',
 
     language: 'pt',
     languageOptions: [
@@ -190,6 +191,30 @@ function app() {
     async setUpdateChannel(channel) {
       this.updateChannel = channel;
       await window.antigrabber.updateSettings({ updateChannel: channel });
+    },
+
+    async exportConfig() {
+      const result = await window.antigrabber.exportConfig();
+      this.configFeedback = result.ok ? this.t('settings.exportConfigSuccess') : '';
+      if (result.ok) setTimeout(() => { this.configFeedback = ''; }, 4000);
+    },
+
+    async importConfig() {
+      const result = await window.antigrabber.importConfig();
+      if (result.ok) {
+        this.configFeedback = this.t('settings.importConfigSuccess');
+        const s = result.settings;
+        this.notificationsEnabled = s.notificationsEnabled;
+        this.persistHistory = s.persistHistory;
+        this.muteWhenFullscreen = s.muteWhenFullscreen ?? true;
+        this.language = s.language ?? 'pt';
+        this.updateChannel = s.updateChannel ?? 'stable';
+      } else if (result.reason === 'invalid') {
+        this.configFeedback = this.t('settings.importConfigError');
+      } else {
+        return;
+      }
+      setTimeout(() => { this.configFeedback = ''; }, 4000);
     },
 
     snoozeActive() {

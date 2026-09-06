@@ -140,6 +140,14 @@ const dict = {
     'settings.updateChannel': 'Canal de atualização',
     'settings.channelStable': 'Estável',
     'settings.channelBeta': 'Beta',
+
+    'settings.configTitle': 'Configuração',
+    'settings.configNote': 'Exporte suas exceções e preferências pra levar pra outro computador, ou importe um arquivo salvo antes.',
+    'settings.exportConfig': 'Exportar configuração (.json)',
+    'settings.importConfig': 'Importar configuração (.json)',
+    'settings.exportConfigSuccess': 'Configuração exportada.',
+    'settings.importConfigSuccess': 'Configuração importada.',
+    'settings.importConfigError': 'Arquivo inválido.',
   },
 
   en: {
@@ -267,6 +275,14 @@ const dict = {
     'settings.updateChannel': 'Update channel',
     'settings.channelStable': 'Stable',
     'settings.channelBeta': 'Beta',
+
+    'settings.configTitle': 'Configuration',
+    'settings.configNote': 'Export your exceptions and preferences to bring to another computer, or import a file saved earlier.',
+    'settings.exportConfig': 'Export configuration (.json)',
+    'settings.importConfig': 'Import configuration (.json)',
+    'settings.exportConfigSuccess': 'Configuration exported.',
+    'settings.importConfigSuccess': 'Configuration imported.',
+    'settings.importConfigError': 'Invalid file.',
   },
 
   es: {
@@ -394,6 +410,14 @@ const dict = {
     'settings.updateChannel': 'Canal de actualización',
     'settings.channelStable': 'Estable',
     'settings.channelBeta': 'Beta',
+
+    'settings.configTitle': 'Configuración',
+    'settings.configNote': 'Exporta tus excepciones y preferencias para llevarlas a otro equipo, o importa un archivo guardado antes.',
+    'settings.exportConfig': 'Exportar configuración (.json)',
+    'settings.importConfig': 'Importar configuración (.json)',
+    'settings.exportConfigSuccess': 'Configuración exportada.',
+    'settings.importConfigSuccess': 'Configuración importada.',
+    'settings.importConfigError': 'Archivo inválido.',
   },
 };
 

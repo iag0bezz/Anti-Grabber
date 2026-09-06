@@ -24,6 +24,8 @@ public static class HostStrings
             ["menu.open"] = "Abrir AntiGrabber",
             ["menu.quit"] = "Sair",
             ["export.dialogTitle"] = "Exportar histórico de bloqueios",
+            ["export.configDialogTitle"] = "Exportar configuração do AntiGrabber",
+            ["import.configDialogTitle"] = "Importar configuração do AntiGrabber",
         },
         ["en"] = new()
         {
@@ -41,6 +43,8 @@ public static class HostStrings
             ["menu.open"] = "Open AntiGrabber",
             ["menu.quit"] = "Quit",
             ["export.dialogTitle"] = "Export block history",
+            ["export.configDialogTitle"] = "Export AntiGrabber configuration",
+            ["import.configDialogTitle"] = "Import AntiGrabber configuration",
         },
         ["es"] = new()
         {
@@ -58,6 +62,8 @@ public static class HostStrings
             ["menu.open"] = "Abrir AntiGrabber",
             ["menu.quit"] = "Salir",
             ["export.dialogTitle"] = "Exportar historial de bloqueos",
+            ["export.configDialogTitle"] = "Exportar configuración de AntiGrabber",
+            ["import.configDialogTitle"] = "Importar configuración de AntiGrabber",
         },
     };
 

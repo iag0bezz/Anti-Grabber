@@ -260,6 +260,20 @@
               <span x-text="t('settings.clearHistory')"></span>
             </button>
           </section>
+
+          <section class="settings-section">
+            <h3 x-text="t('settings.configTitle')"></h3>
+            <p class="settings-note" x-text="t('settings.configNote')"></p>
+            <button class="btn-outline" @click="exportConfig()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+              <span x-text="t('settings.exportConfig')"></span>
+            </button>
+            <button class="btn-outline" @click="importConfig()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+              <span x-text="t('settings.importConfig')"></span>
+            </button>
+            <p class="settings-note settings-note-small" x-show="configFeedback" x-cloak x-text="configFeedback"></p>
+          </section>
         </div>
       </div>
     </section>
