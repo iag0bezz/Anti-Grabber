@@ -55,6 +55,7 @@ const dict = {
 
     'settings.notifications': 'Notificações',
     'settings.notifyOnBlock': 'Mostrar notificação ao bloquear',
+    'settings.muteFullscreen': 'Silenciar notificações em tela cheia (jogos, apresentações)',
     'settings.snoozeTitle': 'Silenciar notificações',
     'settings.snooze15': '15 min',
     'settings.snooze1h': '1 hora',
@@ -178,6 +179,7 @@ const dict = {
 
     'settings.notifications': 'Notifications',
     'settings.notifyOnBlock': 'Show a notification when blocking',
+    'settings.muteFullscreen': 'Mute notifications in fullscreen (games, presentations)',
     'settings.snoozeTitle': 'Snooze notifications',
     'settings.snooze15': '15 min',
     'settings.snooze1h': '1 hour',
@@ -301,6 +303,7 @@ const dict = {
 
     'settings.notifications': 'Notificaciones',
     'settings.notifyOnBlock': 'Mostrar notificación al bloquear',
+    'settings.muteFullscreen': 'Silenciar notificaciones en pantalla completa (juegos, presentaciones)',
     'settings.snoozeTitle': 'Silenciar notificaciones',
     'settings.snooze15': '15 min',
     'settings.snooze1h': '1 hora',

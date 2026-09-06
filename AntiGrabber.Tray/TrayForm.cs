@@ -19,7 +19,7 @@ public sealed class TrayForm : Form
     private readonly TrayPipeConnection _pipe = new();
     private readonly Dictionary<string, Icon> _badgeCache = new();
     private readonly System.Windows.Forms.Timer _revertTimer = new() { Interval = (int)RevertToActiveDelay.TotalMilliseconds };
-    private readonly System.Windows.Forms.Timer _updateCheckTimer = new() { Interval = (int)TimeSpan.FromHours(6).TotalMilliseconds };
+    private readonly System.Windows.Forms.Timer _updateCheckTimer = new() { Interval = (int)TimeSpan.FromMinutes(5).TotalMilliseconds };
     private readonly UpdateService _updates;
 
     private Bridge? _bridge;
@@ -27,6 +27,7 @@ public sealed class TrayForm : Form
     private int _unseenBlockCount;
     private ServiceStatusPayload? _lastStatus;
     private RuleEntryPayload[]? _lastRules;
+    private bool _updateToastShown;
 
     public TrayForm()
     {
@@ -43,7 +44,11 @@ public sealed class TrayForm : Form
 
         _revertTimer.Tick += (_, _) => { _revertTimer.Stop(); SetTrayState("active"); };
 
-        _updates = new UpdateService(_store, (channel, payload) => RunOnUi(() => _bridge?.Send(channel, payload)));
+        _updates = new UpdateService(_store, (channel, payload) => RunOnUi(() =>
+        {
+            _bridge?.Send(channel, payload);
+            if (channel == "update-available") ShowUpdateNotification(payload);
+        }));
         _updateCheckTimer.Tick += async (_, _) => await _updates.CheckAsync();
 
         SetupTrayMenu();
@@ -141,17 +146,41 @@ public sealed class TrayForm : Form
     {
         var args = ToastArguments.Parse(e.Argument);
         var eventId = args.Contains("eventId") ? args["eventId"] : null;
+        var openUpdate = args.Contains("openUpdate");
         RunOnUi(() =>
         {
             ShowMainWindow();
             if (eventId is not null) _bridge?.Send("open-event-detail", eventId);
+            if (openUpdate) _bridge?.Send("update-available", new { version = _updates.Pending?.Version, notes = _updates.Pending?.Notes });
         });
+    }
+
+    // SHQueryUserNotificationState é a mesma API que o Windows usa pra decidir se
+    // mostra toast próprio (Action Center silencia sozinho em tela cheia); reusamos
+    // em vez de tentar detectar jogo/apresentação na mão comparando geometria de janela.
+    [DllImport("shell32.dll")] private static extern int SHQueryUserNotificationState(out int state);
+    private const int QUNS_BUSY = 2;
+    private const int QUNS_RUNNING_D3D_FULL_SCREEN = 3;
+    private const int QUNS_PRESENTATION_MODE = 4;
+
+    private static bool IsFullscreenAppActive()
+    {
+        try
+        {
+            return SHQueryUserNotificationState(out var state) == 0
+                && state is QUNS_BUSY or QUNS_RUNNING_D3D_FULL_SCREEN or QUNS_PRESENTATION_MODE;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private void ShowBlockNotification(StoredBlockEvent ev)
     {
         var settings = _store.GetSettings();
         if (!settings.NotificationsEnabled || settings.IsNotificationsSnoozed()) return;
+        if (settings.MuteWhenFullscreen && IsFullscreenAppActive()) return;
 
         var lang = settings.Language;
         var vars = new Dictionary<string, string> { ["process"] = ev.ProcessName, ["domain"] = ev.Domain };
@@ -171,6 +200,32 @@ public sealed class TrayForm : Form
         catch (Exception ex)
         {
             DebugLog("toast Show() falhou: " + ex.Message);
+        }
+    }
+
+    private void ShowUpdateNotification(object? payload)
+    {
+        if (_updateToastShown) return;
+        var settings = _store.GetSettings();
+        if (!settings.NotificationsEnabled) return;
+        if (settings.MuteWhenFullscreen && IsFullscreenAppActive()) return;
+
+        var version = payload?.GetType().GetProperty("version")?.GetValue(payload) as string ?? "";
+        var lang = settings.Language;
+        var vars = new Dictionary<string, string> { ["version"] = version };
+
+        try
+        {
+            new ToastContentBuilder()
+                .AddText(HostStrings.T(lang, "notif.updateTitle"))
+                .AddText(HostStrings.T(lang, "notif.updateBody", vars))
+                .AddArgument("openUpdate", "1")
+                .Show();
+            _updateToastShown = true;
+        }
+        catch (Exception ex)
+        {
+            DebugLog("update toast Show() falhou: " + ex.Message);
         }
     }
 

@@ -172,6 +172,10 @@
               <span x-text="t('settings.notifyOnBlock')"></span>
               <input type="checkbox" x-model="notificationsEnabled" @change="saveSettings()" />
             </label>
+            <label class="switch-row">
+              <span x-text="t('settings.muteFullscreen')"></span>
+              <input type="checkbox" x-model="muteWhenFullscreen" @change="saveSettings()" />
+            </label>
 
             <div class="snooze-box" x-show="notificationsEnabled">
               <p class="settings-note settings-note-small" x-text="t('settings.snoozeTitle')"></p>

@@ -26,6 +26,7 @@ function app() {
 
     notificationsEnabled: true,
     persistHistory: true,
+    muteWhenFullscreen: true,
     notificationsSnoozedUntil: null,
     snoozeTick: 0,
 
@@ -84,6 +85,7 @@ function app() {
       window.antigrabber.getSettings().then((s) => {
         this.notificationsEnabled = s.notificationsEnabled;
         this.persistHistory = s.persistHistory;
+        this.muteWhenFullscreen = s.muteWhenFullscreen ?? true;
         this.notificationsSnoozedUntil = s.notificationsSnoozedUntil ?? null;
         this.language = s.language ?? 'pt';
       });
@@ -178,6 +180,7 @@ function app() {
       await window.antigrabber.updateSettings({
         notificationsEnabled: this.notificationsEnabled,
         persistHistory: this.persistHistory,
+        muteWhenFullscreen: this.muteWhenFullscreen,
       });
     },
 
