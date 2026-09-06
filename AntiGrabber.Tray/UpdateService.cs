@@ -92,13 +92,21 @@ public sealed class UpdateService
             Directory.CreateDirectory(workDir);
             var setupPath = Path.Combine(workDir, "AntiGrabberSetup.exe");
 
-            _send("update-progress", new { phase = "downloading", percent = 0 });
-            await DownloadAsync(pending.SetupUrl, setupPath, percent => _send("update-progress", new { phase = "downloading", percent }));
-
-            _send("update-progress", new { phase = "verifying" });
             var shaText = await _http.GetStringAsync(pending.ShaUrl);
             var expectedHash = shaText.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.ToLowerInvariant() ?? "";
-            var actualHash = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(setupPath))).ToLowerInvariant();
+
+            // Instalador dessa versão já baixado numa tentativa anterior (falha de rede
+            // no meio, app fechado no meio do update) e com hash batendo: não baixa de
+            // novo, só reaproveita o arquivo — economiza banda numa versão "grande".
+            var cachedHash = expectedHash.Length > 0 && File.Exists(setupPath) ? await HashFileAsync(setupPath) : "";
+            var cached = cachedHash.Length > 0 && cachedHash == expectedHash;
+
+            _send("update-progress", new { phase = "downloading", percent = cached ? 100 : 0 });
+            if (!cached)
+                await DownloadAsync(pending.SetupUrl, setupPath, percent => _send("update-progress", new { phase = "downloading", percent }));
+
+            _send("update-progress", new { phase = "verifying" });
+            var actualHash = cached ? cachedHash : await HashFileAsync(setupPath);
             if (expectedHash.Length == 0 || actualHash != expectedHash) throw new InvalidOperationException("hash-mismatch-setup");
 
             // Instalador roda elevado e silencioso, sobrescreve a instalação atual
@@ -108,6 +116,12 @@ public sealed class UpdateService
             _send("update-progress", new { phase = "installing" });
             var ok = await RunInstallerElevatedAsync(setupPath);
             if (!ok) throw new InvalidOperationException("installer-failed");
+
+            // Update aplicado com sucesso: o instalador baixado (e qualquer versão
+            // antiga que tenha ficado pra trás) não serve mais pra nada. Apaga a
+            // pasta "updates" inteira pra não acumular AntiGrabberSetup.exe de
+            // toda atualização já instalada.
+            TryDeleteOldUpdateFolders();
 
             _send("update-progress", new { phase = "relaunching" });
             Environment.Exit(0);
@@ -119,6 +133,24 @@ public sealed class UpdateService
         finally
         {
             _inProgress = false;
+        }
+    }
+
+    private static async Task<string> HashFileAsync(string path) =>
+        Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(path))).ToLowerInvariant();
+
+    private static void TryDeleteOldUpdateFolders()
+    {
+        try
+        {
+            var updatesRoot = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "AntiGrabber", "updates");
+            if (Directory.Exists(updatesRoot)) Directory.Delete(updatesRoot, recursive: true);
+        }
+        catch
+        {
+            // best-effort — instalação já concluiu, não vale falhar o update por isso.
         }
     }
 
