@@ -28,6 +28,7 @@ builder.Services.AddSingleton(new DomainWhitelistStore(whitelistPath));
 builder.Services.AddSingleton<CorrelationTracker>();
 builder.Services.AddSingleton<MonitoredAppsState>();
 builder.Services.AddSingleton<BlockStatsTracker>();
+builder.Services.AddSingleton<RuleRevalidationSignal>();
 builder.Services.AddSingleton<IpcServer>();
 builder.Services.Configure<RuleUpdateOptions>(builder.Configuration.GetSection("RuleUpdate"));
 

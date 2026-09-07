@@ -2,6 +2,7 @@ using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Threading.Channels;
+using AntiGrabber.Service.Rules;
 using AntiGrabber.Shared;
 
 namespace AntiGrabber.Service.Ipc;
@@ -12,19 +13,23 @@ public sealed class IpcServer : BackgroundService
     private readonly DomainWhitelistStore _whitelist;
     private readonly MonitoredAppsState _monitoredApps;
     private readonly BlockStatsTracker _blockStats;
+    private readonly RuleRevalidationSignal _revalidationSignal;
     private volatile ChannelWriter<IpcEnvelope>? _outbound;
     private string _currentState = "idle";
+    private RulesStatusPayload _lastRulesStatus = new() { LastCheckedUtc = null, LastCheckOk = false };
 
     public IpcServer(
         ILogger<IpcServer> logger,
         DomainWhitelistStore whitelist,
         MonitoredAppsState monitoredApps,
-        BlockStatsTracker blockStats)
+        BlockStatsTracker blockStats,
+        RuleRevalidationSignal revalidationSignal)
     {
         _logger = logger;
         _whitelist = whitelist;
         _monitoredApps = monitoredApps;
         _blockStats = blockStats;
+        _revalidationSignal = revalidationSignal;
     }
 
     public async Task PublishAsync(IpcEnvelope envelope)
@@ -32,6 +37,12 @@ public sealed class IpcServer : BackgroundService
         var outbound = _outbound;
         if (outbound is null) return;
         await outbound.WriteAsync(envelope);
+    }
+
+    public Task PublishRulesStatusAsync(DateTimeOffset? lastCheckedUtc, bool ok)
+    {
+        _lastRulesStatus = new RulesStatusPayload { LastCheckedUtc = lastCheckedUtc, LastCheckOk = ok };
+        return PublishAsync(new IpcEnvelope { Type = IpcMessageType.RulesStatus, RulesStatus = _lastRulesStatus });
     }
 
     public Task PublishStatusAsync(string state)
@@ -92,6 +103,7 @@ public sealed class IpcServer : BackgroundService
 
         await PublishStatusAsync(_currentState);
         await PublishRulesSnapshotAsync();
+        await PublishAsync(new IpcEnvelope { Type = IpcMessageType.RulesStatus, RulesStatus = _lastRulesStatus });
 
         try
         {
@@ -146,6 +158,10 @@ public sealed class IpcServer : BackgroundService
                     envelope.SetRuleEnabled.ProcessName, envelope.SetRuleEnabled.Domain,
                     envelope.SetRuleEnabled.Enabled ? "reativada" : "desativada");
                 await PublishRulesSnapshotAsync();
+                break;
+
+            case IpcMessageType.RevalidateRulesCommand:
+                _revalidationSignal.Request();
                 break;
         }
     }
