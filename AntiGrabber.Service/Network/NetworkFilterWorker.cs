@@ -132,8 +132,11 @@ public sealed class NetworkFilterWorker : BackgroundService
         if (parsed.Protocol != ProtocolType.Tcp || parsed.TcpHeader == null || parsed.DataLength == 0)
             return false;
 
-        var extracted = TlsSniParser.TryExtractSni(parsed.DataSpan);
-        if (extracted is null) return false;
+        // TODO(reassembly): status Incomplete hoje é tratado igual Invalid (forward sem
+        // decisão) — ClientHello fragmentado em vários segmentos TCP ainda escapa da
+        // inspeção. Reassembly por fluxo entra em etapa separada.
+        var status = TlsSniParser.TryExtractSni(parsed.DataSpan, out var extracted);
+        if (status != ClientHelloParseStatus.Complete || extracted is null) return false;
 
         sni = extracted;
         localPort = parsed.TcpHeader->SrcPort;
