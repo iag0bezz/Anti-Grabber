@@ -1,1 +1,14 @@
-[]
+[
+  { "domain": "battle.net", "allowedProcessNames": ["Battle.net.exe", "Agent.exe"] },
+  { "domain": "blizzard.com", "allowedProcessNames": ["Battle.net.exe", "Agent.exe"] },
+  { "domain": "ea.com", "allowedProcessNames": ["EADesktop.exe", "EABackgroundService.exe"] },
+  { "domain": "ubisoftconnect.com", "allowedProcessNames": ["UbisoftConnect.exe", "upc.exe"] },
+  { "domain": "ubisoft.com", "allowedProcessNames": ["UbisoftConnect.exe", "upc.exe"] },
+  { "domain": "gog.com", "allowedProcessNames": ["GalaxyClient.exe", "GalaxyCommunication.exe"] },
+  { "domain": "epicgames.com", "allowedProcessNames": ["EpicGamesLauncher.exe"] },
+  { "domain": "riotgames.com", "allowedProcessNames": ["RiotClientServices.exe", "LeagueClientUx.exe", "VALORANT.exe"] },
+  { "domain": "zoom.us", "allowedProcessNames": ["Zoom.exe"] },
+  { "domain": "teams.microsoft.com", "allowedProcessNames": ["Teams.exe", "ms-teams.exe"] },
+  { "domain": "slack.com", "allowedProcessNames": ["slack.exe"] },
+  { "domain": "spotify.com", "allowedProcessNames": ["Spotify.exe"] }
+]
