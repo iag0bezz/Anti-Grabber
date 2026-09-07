@@ -11,6 +11,7 @@ namespace AntiGrabber.Tray;
 public sealed class TrayForm : Form
 {
     private const string VirtualHost = "app.antigrabber.local";
+    private const string ServiceName = "AntiGrabberService";
     private static readonly TimeSpan RevertToActiveDelay = TimeSpan.FromMinutes(2);
 
     private readonly WebView2 _webView = new();
@@ -65,11 +66,7 @@ public sealed class TrayForm : Form
         var menu = new ContextMenuStrip();
         menu.Items.Add(HostStrings.T(lang, "menu.open"), null, (_, _) => ShowMainWindow());
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(HostStrings.T(lang, "menu.quit"), null, (_, _) =>
-        {
-            _trayIcon.Visible = false;
-            Application.Exit();
-        });
+        menu.Items.Add(HostStrings.T(lang, "menu.quit"), null, (_, _) => HandleQuitRequested());
         _trayIcon.ContextMenuStrip = menu;
         _trayIcon.DoubleClick -= OnTrayDoubleClick;
         _trayIcon.DoubleClick += OnTrayDoubleClick;
@@ -90,6 +87,112 @@ public sealed class TrayForm : Form
         if (e.CloseReason != CloseReason.UserClosing) return;
         e.Cancel = true;
         Hide();
+    }
+
+    // "Sair" tem 2 sentidos possíveis e o usuário precisa escolher qual: só fechar
+    // esta janela (serviço de proteção continua rodando em segundo plano, igual
+    // hoje) ou desligar tudo de verdade (para o serviço também). O serviço roda
+    // como LocalSystem justamente pra não poder ser derrubado sem essa confirmação
+    // explícita — sem esse cuidado, qualquer processo do mesmo usuário poderia só
+    // "clicar Sair" e desligar a proteção inteira.
+    private void HandleQuitRequested()
+    {
+        var lang = _store.GetSettings().Language;
+
+        var keepButton = new TaskDialogButton(HostStrings.T(lang, "quit.keepProtection"));
+        var stopButton = new TaskDialogButton(HostStrings.T(lang, "quit.stopProtection"));
+
+        var page = new TaskDialogPage
+        {
+            Caption = "AntiGrabber",
+            Heading = HostStrings.T(lang, "quit.heading"),
+            Text = HostStrings.T(lang, "quit.body"),
+            Icon = TaskDialogIcon.Warning,
+            Buttons = { keepButton, stopButton, TaskDialogButton.Cancel },
+            DefaultButton = keepButton,
+            AllowCancel = true,
+        };
+
+        var result = TaskDialog.ShowDialog(this, page);
+
+        if (ReferenceEquals(result, stopButton))
+        {
+            _ = QuitAndStopServiceAsync();
+        }
+        else if (ReferenceEquals(result, keepButton))
+        {
+            _trayIcon.Visible = false;
+            Application.Exit();
+        }
+        // Cancel (ou fechou no X): não faz nada, continua aberto.
+    }
+
+    private async Task QuitAndStopServiceAsync()
+    {
+        var stopped = await Task.Run(() => RunServiceControlElevated("stop"));
+        if (!stopped) return; // UAC negado ou falhou — proteção segue ativa, não fecha a Tray junto (enganaria o usuário)
+
+        _trayIcon.Visible = false;
+        Application.Exit();
+    }
+
+    // Chamado uma vez na inicialização — se o serviço não estiver rodando (parado
+    // manualmente na sessão anterior, ou caiu além do limite de auto-restart do
+    // Windows), religa sozinho. "sc query" não precisa de elevação; só o "start"
+    // elevado roda quando realmente falta religar — assim um lançamento normal
+    // (serviço já ativo, o caso comum) nunca pede UAC.
+    private static async Task EnsureServiceRunningAsync()
+    {
+        var running = await Task.Run(IsServiceRunning);
+        if (running) return;
+        await Task.Run(() => RunServiceControlElevated("start"));
+    }
+
+    private static bool IsServiceRunning()
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("sc.exe", $"query {ServiceName}")
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                CreateNoWindow = true,
+            };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc is null) return false;
+            var output = proc.StandardOutput.ReadToEnd();
+            proc.WaitForExit(3000);
+            return output.Contains("RUNNING", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool RunServiceControlElevated(string action)
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("sc.exe", $"{action} {ServiceName}")
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+                WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden,
+            };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc is null) return false;
+            proc.WaitForExit(15000);
+            return proc.ExitCode == 0;
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            return false; // ERROR_CANCELLED — usuário negou o prompt do UAC
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private async Task InitAsync()
@@ -133,6 +236,8 @@ public sealed class TrayForm : Form
         _webView.CoreWebView2.Navigate($"https://{VirtualHost}/index.html");
 
         ToastNotificationManagerCompat.OnActivated += OnToastActivated;
+
+        _ = EnsureServiceRunningAsync(); // não bloqueia a UI — sc query/start rodam em paralelo
 
         _pipe.ConnectionChanged += OnPipeConnectionChanged;
         _pipe.MessageReceived += OnPipeMessage;
