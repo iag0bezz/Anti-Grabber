@@ -32,6 +32,12 @@ function app() {
 
     updateChannel: 'stable',
     configFeedback: '',
+    lastUpdateCheck: null,
+    checkingUpdateNow: false,
+
+    rulesLastCheckedUtc: null,
+    rulesLastCheckOk: false,
+    revalidatingRules: false,
 
     stats: null,
 
@@ -77,6 +83,12 @@ function app() {
         this.rules = rules;
       });
 
+      window.antigrabber.onRulesStatus((status) => {
+        this.rulesLastCheckedUtc = status?.lastCheckedUtc ?? null;
+        this.rulesLastCheckOk = status?.lastCheckOk ?? false;
+        this.revalidatingRules = false;
+      });
+
       window.antigrabber.onUpdateAvailable((info) => {
         this.updateAvailable = info;
       });
@@ -94,6 +106,7 @@ function app() {
         this.notificationsSnoozedUntil = s.notificationsSnoozedUntil ?? null;
         this.language = s.language ?? 'pt';
         this.updateChannel = s.updateChannel ?? 'stable';
+        this.lastUpdateCheck = s.lastUpdateCheck ?? null;
       });
 
       setInterval(() => { this.snoozeTick++; }, 30000);
@@ -302,7 +315,29 @@ function app() {
     },
 
     async checkForUpdateNow() {
-      await window.antigrabber.checkForUpdateNow();
+      this.checkingUpdateNow = true;
+      try {
+        await window.antigrabber.checkForUpdateNow();
+        const s = await window.antigrabber.getSettings();
+        this.lastUpdateCheck = s.lastUpdateCheck ?? null;
+      } finally {
+        this.checkingUpdateNow = false;
+      }
+    },
+
+    async revalidateRulesNow() {
+      this.revalidatingRules = true;
+      await window.antigrabber.revalidateRulesNow();
+      // resultado chega assíncrono via onRulesStatus quando o serviço terminar
+      // de verificar — solta o spinner num tempo razoável mesmo sem resposta
+      // (serviço pode estar desconectado).
+      setTimeout(() => { this.revalidatingRules = false; }, 8000);
+    },
+
+    formatLastChecked(value) {
+      if (!value) return this.t('settings.neverChecked');
+      const d = new Date(value);
+      return d.toLocaleString(this.locale(), { dateStyle: 'short', timeStyle: 'short' });
     },
 
     updatePhaseLabel() {

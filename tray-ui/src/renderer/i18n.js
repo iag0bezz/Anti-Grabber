@@ -150,6 +150,13 @@ const dict = {
     'settings.importConfigSuccess': 'Configuração importada.',
     'settings.importConfigError': 'Arquivo inválido.',
 
+    'settings.lastChecked': 'Última verificação: {date}',
+    'settings.neverChecked': 'nunca',
+    'settings.rulesTitle': 'Regras públicas',
+    'settings.rulesNote': 'Lista de exceções mantida pela comunidade/desenvolvedor, atualizada sem precisar instalar uma nova versão do app.',
+    'settings.revalidateRules': 'Revalidar regras',
+    'settings.rulesCheckFailed': 'Última verificação falhou — mantendo as regras anteriores.',
+
     'stats.totalLabel': 'Bloqueios no total',
     'stats.dailyTitle': 'Bloqueios por dia (14 dias)',
     'stats.topProcesses': 'Programas mais bloqueados',
@@ -292,6 +299,13 @@ const dict = {
     'settings.importConfigSuccess': 'Configuration imported.',
     'settings.importConfigError': 'Invalid file.',
 
+    'settings.lastChecked': 'Last checked: {date}',
+    'settings.neverChecked': 'never',
+    'settings.rulesTitle': 'Public rules',
+    'settings.rulesNote': 'Exception list maintained by the community/developer, updated without needing to install a new app version.',
+    'settings.revalidateRules': 'Revalidate rules',
+    'settings.rulesCheckFailed': 'Last check failed — keeping the previous rules.',
+
     'stats.totalLabel': 'Total blocks',
     'stats.dailyTitle': 'Blocks per day (14 days)',
     'stats.topProcesses': 'Most blocked programs',
@@ -433,6 +447,13 @@ const dict = {
     'settings.exportConfigSuccess': 'Configuración exportada.',
     'settings.importConfigSuccess': 'Configuración importada.',
     'settings.importConfigError': 'Archivo inválido.',
+
+    'settings.lastChecked': 'Última verificación: {date}',
+    'settings.neverChecked': 'nunca',
+    'settings.rulesTitle': 'Reglas públicas',
+    'settings.rulesNote': 'Lista de excepciones mantenida por la comunidad/desarrollador, actualizada sin necesidad de instalar una nueva versión de la app.',
+    'settings.revalidateRules': 'Revalidar reglas',
+    'settings.rulesCheckFailed': 'La última verificación falló — se mantienen las reglas anteriores.',
 
     'stats.totalLabel': 'Bloqueos totales',
     'stats.dailyTitle': 'Bloqueos por día (14 días)',

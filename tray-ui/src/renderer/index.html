@@ -278,10 +278,11 @@
           <section class="settings-section">
             <h3 x-text="t('settings.updates')"></h3>
             <p class="settings-note settings-note-small" x-text="t('settings.currentVersion', { version: appVersion })"></p>
-            <button class="btn-outline" @click="checkForUpdateNow()">
+            <button class="btn-outline" @click="checkForUpdateNow()" :disabled="checkingUpdateNow">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
               <span x-text="t('settings.checkNow')"></span>
             </button>
+            <p class="settings-note settings-note-small" x-text="t('settings.lastChecked', { date: formatLastChecked(lastUpdateCheck) })"></p>
             <p class="settings-note settings-note-small" x-text="t('settings.updateChannel')"></p>
             <div class="snooze-options">
               <button class="chip-btn" :class="{ active: updateChannel === 'stable' }" @click="setUpdateChannel('stable')" x-text="t('settings.channelStable')"></button>
@@ -325,6 +326,17 @@
               <span x-text="t('settings.importConfig')"></span>
             </button>
             <p class="settings-note settings-note-small" x-show="configFeedback" x-cloak x-text="configFeedback"></p>
+          </section>
+
+          <section class="settings-section">
+            <h3 x-text="t('settings.rulesTitle')"></h3>
+            <p class="settings-note" x-text="t('settings.rulesNote')"></p>
+            <button class="btn-outline" @click="revalidateRulesNow()" :disabled="revalidatingRules">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+              <span x-text="t('settings.revalidateRules')"></span>
+            </button>
+            <p class="settings-note settings-note-small" x-text="t('settings.lastChecked', { date: formatLastChecked(rulesLastCheckedUtc) })"></p>
+            <p class="settings-note settings-note-small" x-show="rulesLastCheckedUtc && !rulesLastCheckOk" x-cloak x-text="t('settings.rulesCheckFailed')"></p>
           </section>
         </div>
       </div>

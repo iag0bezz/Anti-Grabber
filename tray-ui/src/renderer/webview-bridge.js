@@ -51,6 +51,7 @@
     onBlockEvent: (cb) => on('block-event', cb),
     onOpenEventDetail: (cb) => on('open-event-detail', cb),
     onRulesSnapshot: (cb) => on('rules-snapshot', cb),
+    onRulesStatus: (cb) => on('rules-status', cb),
     onUpdateAvailable: (cb) => on('update-available', cb),
     onUpdateProgress: (cb) => on('update-progress', cb),
 
@@ -73,6 +74,7 @@
 
     getAppVersion: () => call('get-app-version'),
     checkForUpdateNow: () => call('check-for-update-now'),
+    revalidateRulesNow: () => call('revalidate-rules-now'),
     startUpdate: () => call('start-update'),
     skipUpdateVersion: (version) => call('skip-update-version', version),
 

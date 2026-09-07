@@ -255,6 +255,10 @@ public sealed class TrayForm : Form
                     _bridge?.Send("rules-snapshot", _lastRules);
                     break;
 
+                case IpcMessageType.RulesStatus:
+                    _bridge?.Send("rules-status", envelope.RulesStatus);
+                    break;
+
                 case IpcMessageType.BlockEvent when envelope.BlockEvent is { } payload:
                     var id = $"{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}-{Guid.NewGuid():N}"[..24];
                     var stored = _store.AddEvent(StoredBlockEvent.FromPayload(payload, id));
@@ -457,7 +461,12 @@ public sealed class TrayForm : Form
             return Task.FromResult<object?>(true);
         });
 
-        bridge.On("check-for-update-now", args => { var t = _updates.CheckAsync(); return Task.FromResult<object?>(true); });
+        bridge.On("check-for-update-now", async args => { await _updates.CheckAsync(); return true; });
+
+        bridge.On("revalidate-rules-now", async args => await _pipe.SendAsync(new IpcEnvelope
+        {
+            Type = IpcMessageType.RevalidateRulesCommand,
+        }));
 
         bridge.On("start-update", args =>
         {
