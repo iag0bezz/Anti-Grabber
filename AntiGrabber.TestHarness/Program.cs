@@ -1,9 +1,13 @@
+using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using AntiGrabber.Service.Network;
 using AntiGrabber.Shared;
+using WindivertDotnet;
 
 const string SyntheticPayload = "TEST_PAYLOAD_NAO_E_TOKEN_REAL|";
 const string TlsParserSelfTestScenario = "tls-parser-selftest";
+const string ReassemblySelfTestScenario = "tls-reassembly-selftest";
 
 var scenarios = new Dictionary<string, ScenarioDefinition>(StringComparer.OrdinalIgnoreCase)
 {
@@ -16,7 +20,7 @@ if (!options.TestMode)
 {
     Console.Error.WriteLine("Recusado: TestHarness só roda com --test-mode.");
     Console.Error.WriteLine("Uso: AntiGrabber.TestHarness --test-mode --scenario=<cenario> [--webhook-url=<url-de-teste>]");
-    Console.Error.WriteLine($"Cenários disponíveis: {string.Join(", ", scenarios.Keys)}, {TlsParserSelfTestScenario} (sem rede)");
+    Console.Error.WriteLine($"Cenários disponíveis: {string.Join(", ", scenarios.Keys)}, {TlsParserSelfTestScenario}, {ReassemblySelfTestScenario} (sem rede)");
     return 2;
 }
 
@@ -25,6 +29,19 @@ if (string.Equals(options.Scenario, TlsParserSelfTestScenario, StringComparison.
     try
     {
         return RunTlsParserSelfTest();
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(ex.Message);
+        return 1;
+    }
+}
+
+if (string.Equals(options.Scenario, ReassemblySelfTestScenario, StringComparison.OrdinalIgnoreCase))
+{
+    try
+    {
+        return await RunReassemblySelfTestAsync();
     }
     catch (Exception ex)
     {
@@ -150,6 +167,121 @@ static int RunTlsParserSelfTest()
 
     Console.WriteLine("PASS — TlsSniParser: completo, fragmentado, inválido e sem-SNI, 4/4 ok.");
     return 0;
+}
+
+// Self-check do ClientHelloReassembler — sem rede, sem driver WinDivert, sem privilégio
+// elevado. Feed() nunca reabre os pacotes que recebe (só clona/guarda pra reenviar depois),
+// então um WinDivertPacket/WinDivertAddress vazio serve de "envelope" de teste — os bytes
+// de TLS reais viajam pelo parâmetro payload, não pelo conteúdo do pacote.
+static async Task<int> RunReassemblySelfTestAsync()
+{
+    var flowA = new TcpFlowKey(IPAddress.Parse("10.0.0.1"), 51000, IPAddress.Parse("93.184.216.34"), 443);
+    var flowB = new TcpFlowKey(IPAddress.Parse("10.0.0.1"), 51001, IPAddress.Parse("93.184.216.34"), 443);
+
+    // Caso 1: ClientHello partido em 2 segmentos TCP chega completo e correto.
+    using (var reassembler = new ClientHelloReassembler())
+    {
+        var fullHello = BuildClientHello("example.com");
+        var half = fullHello.Length / 2;
+        var chunk1 = fullHello[..half];
+        var chunk2 = fullHello[half..];
+
+        var firstStatus = TlsSniParser.TryExtractSni(chunk1, out _);
+        Assert(firstStatus == ClientHelloParseStatus.Incomplete,
+            $"primeira metade do ClientHello deveria dar Incomplete no parser cru, deu {firstStatus}");
+
+        using var p1 = DummyPacket();
+        using var a1 = new WinDivertAddress();
+        var r1 = reassembler.Feed(flowA, seq: 1000, chunk1, 51000, AddressFamily.InterNetwork, p1, a1);
+        Assert(r1.Status == ReassemblyStatus.Buffering, $"1º fragmento deveria dar Buffering, deu {r1.Status}");
+        Assert(reassembler.IsTracking(flowA), "fluxo deveria estar rastreado após 1º fragmento");
+
+        using var p2 = DummyPacket();
+        using var a2 = new WinDivertAddress();
+        var r2 = reassembler.Feed(flowA, seq: (uint)(1000 + chunk1.Length), chunk2, 51000, AddressFamily.InterNetwork, p2, a2);
+        Assert(r2.Status == ReassemblyStatus.Ready, $"2º fragmento deveria completar o ClientHello (Ready), deu {r2.Status}");
+        Assert(r2.Sni == "example.com", $"SNI reconstruído esperado 'example.com', veio '{r2.Sni}'");
+        Assert(r2.Flush is { Count: 2 }, $"Flush deveria conter os 2 fragmentos originais, veio {r2.Flush?.Count ?? -1}");
+        Assert(!reassembler.IsTracking(flowA), "fluxo deveria ter sido removido do rastreamento após completar");
+        DisposeFlush(r2.Flush);
+
+        Console.WriteLine("PASS — reassembly: ClientHello em 2 segmentos reconstruído com SNI correto.");
+    }
+
+    // Caso 2: primeiro fragmento fica incompleto (só 4 bytes, falta o record header
+    // inteiro) e nunca é alcançado por nenhum fragmento seguinte — todos chegam depois
+    // de um buraco de sequence number permanente. TotalBytes cresce só com esse lixo
+    // não-contíguo até estourar o cap — precisa desistir (fail-open), não bufferizar
+    // pra sempre.
+    using (var reassembler = new ClientHelloReassembler())
+    {
+        using var p0 = DummyPacket();
+        using var a0 = new WinDivertAddress();
+        var first = reassembler.Feed(flowB, seq: 5000, new byte[] { 0x16, 0x03, 0x01, 0x00 }, 51001, AddressFamily.InterNetwork, p0, a0);
+        Assert(first.Status == ReassemblyStatus.Buffering,
+            $"fragmento de 4 bytes (sem record header completo) deveria dar Buffering, deu {first.Status}");
+
+        var last = first;
+        var gapSeq = 90_000u; // bem longe de 5004 (próximo esperado) — buraco nunca fecha
+        var totalSent = 4;
+        while (totalSent <= 32 * 1024) // mesmo cap do reassembler (32KB) — precisa estourar
+        {
+            using var p = DummyPacket();
+            using var a = new WinDivertAddress();
+            var chunk = new byte[2000];
+            last = reassembler.Feed(flowB, gapSeq, chunk, 51001, AddressFamily.InterNetwork, p, a);
+            gapSeq += (uint)chunk.Length;
+            totalSent += chunk.Length;
+
+            if (last.Status != ReassemblyStatus.Buffering) break;
+        }
+
+        Assert(last.Status == ReassemblyStatus.GiveUp,
+            $"fluxo que estoura o cap de bytes deveria desistir (GiveUp/fail-open), deu {last.Status}");
+        Assert(last.Flush is { Count: > 0 }, "GiveUp deveria devolver os fragmentos bufferizados pra reenviar");
+        DisposeFlush(last.Flush);
+
+        Console.WriteLine("PASS — reassembly: fluxo com buraco permanente estoura o cap e libera o tráfego (fail-open).");
+    }
+
+    // Caso 3: fluxo parado (nenhum fragmento novo) precisa ser varrido por timeout e
+    // liberado — senão fica bufferizado pra sempre, vazando memória e travando a conexão.
+    using (var reassembler = new ClientHelloReassembler())
+    {
+        using var p1 = DummyPacket();
+        using var a1 = new WinDivertAddress();
+        var stuck = reassembler.Feed(flowA, seq: 9000, new byte[] { 0x16, 0x03, 0x01, 0x00, 0x40 }, 51000, AddressFamily.InterNetwork, p1, a1);
+        Assert(stuck.Status == ReassemblyStatus.Buffering, "fragmento inicial isolado deveria ficar bufferizado");
+
+        await Task.Delay(900); // > IdleTimeout (750ms) do reassembler
+
+        using var p2 = DummyPacket();
+        using var a2 = new WinDivertAddress();
+        var other = reassembler.Feed(flowB, seq: 1, new byte[] { 0x17, 0x03, 0x03, 0x00, 0x01, 0x00 }, 51001, AddressFamily.InterNetwork, p2, a2);
+
+        Assert(other.ExpiredFlows is { Count: 1 },
+            $"o fluxo travado deveria ter sido varrido como expirado, ExpiredFlows={other.ExpiredFlows?.Count ?? -1}");
+        Assert(!reassembler.IsTracking(flowA), "fluxo expirado deveria ter sido removido do rastreamento");
+        DisposeFlush(other.ExpiredFlows![0]);
+        if (other.Flush is not null) DisposeFlush(other.Flush);
+
+        Console.WriteLine("PASS — reassembly: fluxo parado é varrido por timeout e liberado (sem vazar).");
+    }
+
+    return 0;
+}
+
+static WinDivertPacket DummyPacket()
+{
+    var p = new WinDivertPacket(1);
+    p.Length = 1;
+    return p;
+}
+
+static void DisposeFlush(List<PendingFragment>? fragments)
+{
+    if (fragments is null) return;
+    foreach (var f in fragments) { f.Packet.Dispose(); f.Address.Dispose(); }
 }
 
 static void Assert(bool condition, string message)
