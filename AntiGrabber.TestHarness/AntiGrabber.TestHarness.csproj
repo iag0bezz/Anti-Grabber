@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AntiGrabber.Shared\AntiGrabber.Shared.csproj" />
+    <ProjectReference Include="..\AntiGrabber.Service\AntiGrabber.Service.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
