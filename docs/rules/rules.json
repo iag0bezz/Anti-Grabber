@@ -5,7 +5,7 @@
   { "domain": "ubisoftconnect.com", "allowedProcessNames": ["UbisoftConnect.exe", "upc.exe"] },
   { "domain": "ubisoft.com", "allowedProcessNames": ["UbisoftConnect.exe", "upc.exe"] },
   { "domain": "gog.com", "allowedProcessNames": ["GalaxyClient.exe", "GalaxyCommunication.exe"] },
-  { "domain": "epicgames.com", "allowedProcessNames": ["EpicGamesLauncher.exe"] },
+  { "domain": "epicgames.com", "allowedProcessNames": ["EpicGamesLauncher.exe", "EpicOnlineServicesUserHelper.exe"] },
   { "domain": "riotgames.com", "allowedProcessNames": ["RiotClientServices.exe", "LeagueClientUx.exe", "VALORANT.exe"] },
   { "domain": "zoom.us", "allowedProcessNames": ["Zoom.exe"] },
   { "domain": "teams.microsoft.com", "allowedProcessNames": ["Teams.exe", "ms-teams.exe"] },
