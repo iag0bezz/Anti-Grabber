@@ -13,6 +13,8 @@ public enum IpcMessageType
     RulesSnapshot,
     RemoveRuleCommand,
     SetRuleEnabledCommand,
+    RevalidateRulesCommand,
+    RulesStatus,
 }
 
 public sealed class IpcEnvelope
@@ -37,6 +39,9 @@ public sealed class IpcEnvelope
 
     [JsonPropertyName("setRuleEnabled")]
     public SetRuleEnabledPayload? SetRuleEnabled { get; set; }
+
+    [JsonPropertyName("rulesStatus")]
+    public RulesStatusPayload? RulesStatus { get; set; }
 }
 
 public sealed class ServiceStatusPayload
@@ -82,4 +87,10 @@ public sealed class SetRuleEnabledPayload
     [JsonPropertyName("domain")] public string Domain { get; set; } = "";
     [JsonPropertyName("processName")] public string ProcessName { get; set; } = "";
     [JsonPropertyName("enabled")] public bool Enabled { get; set; }
+}
+
+public sealed class RulesStatusPayload
+{
+    [JsonPropertyName("lastCheckedUtc")] public DateTimeOffset? LastCheckedUtc { get; set; }
+    [JsonPropertyName("lastCheckOk")] public bool LastCheckOk { get; set; }
 }
