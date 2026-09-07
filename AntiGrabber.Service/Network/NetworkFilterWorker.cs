@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using AntiGrabber.Service.FileWatch;
 using AntiGrabber.Service.Ipc;
 using AntiGrabber.Shared;
+using Microsoft.Extensions.Options;
 using WindivertDotnet;
 
 namespace AntiGrabber.Service.Network;
@@ -14,20 +15,24 @@ public sealed class NetworkFilterWorker : BackgroundService
     private readonly CorrelationTracker _correlationTracker;
     private readonly IpcServer _ipcServer;
     private readonly BlockStatsTracker _blockStats;
+    private readonly NetworkFilterOptions _options;
     private readonly ClientHelloReassembler _reassembler = new();
+    private readonly QuicClientHelloReassembler _quicReassembler = new();
 
     public NetworkFilterWorker(
         ILogger<NetworkFilterWorker> logger,
         DomainWhitelistStore whitelist,
         CorrelationTracker correlationTracker,
         IpcServer ipcServer,
-        BlockStatsTracker blockStats)
+        BlockStatsTracker blockStats,
+        IOptions<NetworkFilterOptions> options)
     {
         _logger = logger;
         _whitelist = whitelist;
         _correlationTracker = correlationTracker;
         _ipcServer = ipcServer;
         _blockStats = blockStats;
+        _options = options.Value;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -35,7 +40,9 @@ public sealed class NetworkFilterWorker : BackgroundService
         WinDivert divert;
         try
         {
-            const string filter = "outbound and tcp.DstPort == 443";
+            var filter = _options.InspectQuic
+                ? "outbound and (tcp.DstPort == 443 or udp.DstPort == 443)"
+                : "outbound and tcp.DstPort == 443";
             divert = new WinDivert(filter, WinDivertLayer.Network, 0, WinDivertFlag.None);
         }
         catch (Exception ex)
@@ -48,6 +55,7 @@ public sealed class NetworkFilterWorker : BackgroundService
 
         using (divert)
         using (_reassembler)
+        using (_quicReassembler)
         {
             using var packet = new WinDivertPacket(ushort.MaxValue);
             using var address = new WinDivertAddress();
@@ -90,6 +98,12 @@ public sealed class NetworkFilterWorker : BackgroundService
         catch
         {
             await ForwardAsync(divert, packet, address, ct);
+            return;
+        }
+
+        if (parsed.Protocol == ProtocolType.Udp && HasUdpHeader(parsed))
+        {
+            await ProcessQuicPacketAsync(divert, packet, address, parsed, ct);
             return;
         }
 
@@ -149,8 +163,48 @@ public sealed class NetworkFilterWorker : BackgroundService
             return;
         }
 
-        var allow = await DecideAsync(sni, SrcPortOf(parsed), FamilyOf(parsed), ct);
+        var allow = await DecideAsync(sni, SrcPortOf(parsed), FamilyOf(parsed), isUdp: false, ct);
         if (allow) await ForwardAsync(divert, packet, address, ct);
+    }
+
+    /// Caminho QUIC/UDP 443 — só inspeciona o Initial packet do handshake (onde o
+    /// ClientHello viaja em claro, ver QuicInitialCrypto). Pacotes de fases seguintes
+    /// (Handshake/1-RTT) não dá pra decifrar sem os segredos negociados depois do
+    /// Initial, e por isso passam liberados (fail-open) — decisão já foi tomada aqui.
+    private async Task ProcessQuicPacketAsync(WinDivert divert, WinDivertPacket packet, WinDivertAddress address, WinDivertParseResult parsed, CancellationToken ct)
+    {
+        var flowKey = GetUdpFlowKey(parsed);
+        if (flowKey is not { } key || !QuicLongHeaderParser.TryParseInitial(parsed.DataSpan, out var header))
+        {
+            await ForwardAsync(divert, packet, address, ct);
+            return;
+        }
+
+        if (header.TotalPacketLength > parsed.DataSpan.Length)
+        {
+            // Length declarado no header maior que o datagrama recebido — truncado/corrompido.
+            await ForwardAsync(divert, packet, address, ct);
+            return;
+        }
+
+        var keys = QuicInitialCrypto.DeriveClientInitialKeys(header.DestinationConnectionId);
+        // Só decifra este Initial packet — datagramas QUIC podem coalescer mais de um
+        // pacote (ex: Initial + Handshake), e o resto não é nosso pra decifrar aqui.
+        var plaintext = QuicInitialCrypto.TryDecrypt(parsed.DataSpan[..header.TotalPacketLength], header.PacketNumberOffset, keys);
+        if (plaintext is null)
+        {
+            await ForwardAsync(divert, packet, address, ct);
+            return;
+        }
+
+        if (!QuicCryptoFrameExtractor.TryExtract(plaintext, out var chunks) || chunks.Count == 0)
+        {
+            await ForwardAsync(divert, packet, address, ct);
+            return;
+        }
+
+        var result = _quicReassembler.Feed(key, chunks, UdpSrcPortOf(parsed), FamilyOf(parsed), packet, address);
+        await HandleQuicReassemblyResultAsync(divert, result, ct);
     }
 
     private async Task HandleReassemblyResultAsync(WinDivert divert, ReassemblyResult result, CancellationToken ct)
@@ -165,7 +219,7 @@ public sealed class NetworkFilterWorker : BackgroundService
                 break;
 
             case ReassemblyStatus.Ready:
-                var allow = await DecideAsync(result.Sni!, result.LocalPort, result.Family, ct);
+                var allow = await DecideAsync(result.Sni!, result.LocalPort, result.Family, isUdp: false, ct);
                 await FlushAsync(divert, result.Flush!, forward: allow, ct);
                 break;
         }
@@ -175,11 +229,35 @@ public sealed class NetworkFilterWorker : BackgroundService
                 await FlushAsync(divert, flow, forward: true, ct);
     }
 
-    private async Task<bool> DecideAsync(string sni, ushort localPort, AddressFamily family, CancellationToken ct)
+    private async Task HandleQuicReassemblyResultAsync(WinDivert divert, ReassemblyResult result, CancellationToken ct)
+    {
+        switch (result.Status)
+        {
+            case ReassemblyStatus.Buffering:
+                break;
+
+            case ReassemblyStatus.GiveUp:
+                await FlushAsync(divert, result.Flush!, forward: true, ct);
+                break;
+
+            case ReassemblyStatus.Ready:
+                var allow = await DecideAsync(result.Sni!, result.LocalPort, result.Family, isUdp: true, ct);
+                await FlushAsync(divert, result.Flush!, forward: allow, ct);
+                break;
+        }
+
+        if (result.ExpiredFlows is { Count: > 0 } expired)
+            foreach (var flow in expired)
+                await FlushAsync(divert, flow, forward: true, ct);
+    }
+
+    private async Task<bool> DecideAsync(string sni, ushort localPort, AddressFamily family, bool isUdp, CancellationToken ct)
     {
         if (!_whitelist.IsSensitiveDomain(sni)) return true;
 
-        var pid = TcpProcessResolver.ResolvePidByLocalPort(localPort, family);
+        var pid = isUdp
+            ? UdpProcessResolver.ResolvePidByLocalPort(localPort, family)
+            : TcpProcessResolver.ResolvePidByLocalPort(localPort, family);
 
         var processName = TryGetProcessName(pid);
         if (processName is not null && _whitelist.IsAllowed(sni, processName))
@@ -254,6 +332,20 @@ public sealed class NetworkFilterWorker : BackgroundService
             return new TcpFlowKey(parsed.IPV4Header->SrcAddr, parsed.TcpHeader->SrcPort, parsed.IPV4Header->DstAddr, parsed.TcpHeader->DstPort);
         if (parsed.IPV6Header != null)
             return new TcpFlowKey(parsed.IPV6Header->SrcAddr, parsed.TcpHeader->SrcPort, parsed.IPV6Header->DstAddr, parsed.TcpHeader->DstPort);
+        return null;
+    }
+
+    private static unsafe bool HasUdpHeader(WinDivertParseResult parsed) => parsed.UdpHeader != null;
+
+    private static unsafe ushort UdpSrcPortOf(WinDivertParseResult parsed) => parsed.UdpHeader->SrcPort;
+
+    private static unsafe UdpFlowKey? GetUdpFlowKey(WinDivertParseResult parsed)
+    {
+        if (parsed.UdpHeader == null) return null;
+        if (parsed.IPV4Header != null)
+            return new UdpFlowKey(parsed.IPV4Header->SrcAddr, parsed.UdpHeader->SrcPort, parsed.IPV4Header->DstAddr, parsed.UdpHeader->DstPort);
+        if (parsed.IPV6Header != null)
+            return new UdpFlowKey(parsed.IPV6Header->SrcAddr, parsed.UdpHeader->SrcPort, parsed.IPV6Header->DstAddr, parsed.UdpHeader->DstPort);
         return null;
     }
 

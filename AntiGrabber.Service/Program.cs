@@ -31,6 +31,7 @@ builder.Services.AddSingleton<BlockStatsTracker>();
 builder.Services.AddSingleton<RuleRevalidationSignal>();
 builder.Services.AddSingleton<IpcServer>();
 builder.Services.Configure<RuleUpdateOptions>(builder.Configuration.GetSection("RuleUpdate"));
+builder.Services.Configure<NetworkFilterOptions>(builder.Configuration.GetSection("NetworkFilter"));
 
 builder.Services.AddHostedService<StartupChecks>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IpcServer>());

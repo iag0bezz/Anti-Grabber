@@ -10,6 +10,7 @@ const string TlsParserSelfTestScenario = "tls-parser-selftest";
 const string ReassemblySelfTestScenario = "tls-reassembly-selftest";
 const string QuicCryptoSelfTestScenario = "quic-crypto-selftest";
 const string QuicHeaderSelfTestScenario = "quic-header-selftest";
+const string QuicWiringSelfTestScenario = "quic-wiring-selftest";
 
 var scenarios = new Dictionary<string, ScenarioDefinition>(StringComparer.OrdinalIgnoreCase)
 {
@@ -22,7 +23,7 @@ if (!options.TestMode)
 {
     Console.Error.WriteLine("Recusado: TestHarness só roda com --test-mode.");
     Console.Error.WriteLine("Uso: AntiGrabber.TestHarness --test-mode --scenario=<cenario> [--webhook-url=<url-de-teste>]");
-    Console.Error.WriteLine($"Cenários disponíveis: {string.Join(", ", scenarios.Keys)}, {TlsParserSelfTestScenario}, {ReassemblySelfTestScenario}, {QuicCryptoSelfTestScenario}, {QuicHeaderSelfTestScenario} (sem rede)");
+    Console.Error.WriteLine($"Cenários disponíveis: {string.Join(", ", scenarios.Keys)}, {TlsParserSelfTestScenario}, {ReassemblySelfTestScenario}, {QuicCryptoSelfTestScenario}, {QuicHeaderSelfTestScenario}, {QuicWiringSelfTestScenario} (sem rede)");
     return 2;
 }
 
@@ -70,6 +71,19 @@ if (string.Equals(options.Scenario, QuicHeaderSelfTestScenario, StringComparison
     try
     {
         return RunQuicHeaderSelfTest();
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(ex.Message);
+        return 1;
+    }
+}
+
+if (string.Equals(options.Scenario, QuicWiringSelfTestScenario, StringComparison.OrdinalIgnoreCase))
+{
+    try
+    {
+        return await RunQuicWiringSelfTestAsync();
     }
     catch (Exception ex)
     {
@@ -398,6 +412,78 @@ static int RunQuicHeaderSelfTest()
 
     Console.WriteLine("PASS — QuicLongHeaderParser: DCID/SCID/token/pnOffset/length batem com o vetor oficial RFC 9001 A.2.");
     return 0;
+}
+
+// Self-check do QuicCryptoFrameExtractor + QuicClientHelloReassembler — sem rede,
+// sem WinDivert real, sem cripto (essa parte já é coberta ponta a ponta pelo
+// quic-crypto-selftest). Aqui o que importa é: dado o payload já decifrado de dois
+// Initial packets (frames CRYPTO com offset explícito, como definido no RFC 9000
+// §19.6), o ClientHello é remontado e o SNI sai correto — e um frame de tipo
+// desconhecido faz o extractor desistir (fail-open), como documentado nele.
+static async Task<int> RunQuicWiringSelfTestAsync()
+{
+    var helloRecord = BuildClientHello("example.com");
+    var handshake = helloRecord[5..]; // tira o record layer TLS — QUIC carrega só a mensagem de handshake
+
+    var half = handshake.Length / 2;
+    var chunk1 = handshake[..half];
+    var chunk2 = handshake[half..];
+
+    var packet1Payload = BuildCryptoFramePayload(offset: 0, data: chunk1);
+    var packet2Payload = BuildCryptoFramePayload(offset: (ulong)chunk1.Length, data: chunk2);
+
+    var flow = new UdpFlowKey(IPAddress.Parse("10.0.0.1"), 51000, IPAddress.Parse("93.184.216.34"), 443);
+
+    using (var reassembler = new QuicClientHelloReassembler())
+    {
+        Assert(QuicCryptoFrameExtractor.TryExtract(packet1Payload, out var chunks1),
+            "extractor deveria reconhecer o payload sintético do 1º Initial packet");
+
+        using var p1 = DummyPacket();
+        using var a1 = new WinDivertAddress();
+        var r1 = reassembler.Feed(flow, chunks1, 51000, AddressFamily.InterNetwork, p1, a1);
+        Assert(r1.Status == ReassemblyStatus.Buffering, $"1º Initial packet (metade do ClientHello) deveria dar Buffering, deu {r1.Status}");
+
+        Assert(QuicCryptoFrameExtractor.TryExtract(packet2Payload, out var chunks2),
+            "extractor deveria reconhecer o payload sintético do 2º Initial packet");
+
+        using var p2 = DummyPacket();
+        using var a2 = new WinDivertAddress();
+        var r2 = reassembler.Feed(flow, chunks2, 51000, AddressFamily.InterNetwork, p2, a2);
+        Assert(r2.Status == ReassemblyStatus.Ready, $"2º Initial packet deveria completar o ClientHello (Ready), deu {r2.Status}");
+        Assert(r2.Sni == "example.com", $"SNI reconstruído esperado 'example.com', veio '{r2.Sni}'");
+        Assert(r2.Flush is { Count: 2 }, $"Flush deveria conter os 2 Initial packets originais, veio {r2.Flush?.Count ?? -1}");
+        DisposeFlush(r2.Flush);
+    }
+
+    // Frame de tipo não reconhecido (ex: STREAM, 0x08) — não dá pra saber o tamanho
+    // pra pular, extractor precisa desistir do pacote inteiro (fail-open).
+    var unknownFrameType = new byte[] { 0x08, 0x01, 0x02, 0x03 };
+    Assert(!QuicCryptoFrameExtractor.TryExtract(unknownFrameType, out _),
+        "frame de tipo desconhecido deveria fazer o extractor desistir");
+
+    Console.WriteLine("PASS — QUIC wiring: ClientHello remontado a partir de 2 Initial packets via frames CRYPTO, SNI 'example.com' extraído; frame desconhecido rejeitado.");
+    await Task.CompletedTask;
+    return 0;
+}
+
+// Monta o payload de um pacote QUIC Initial decifrado contendo só um frame CRYPTO
+// (RFC 9000 §19.6): type(1) + offset varint + length varint + dados.
+static byte[] BuildCryptoFramePayload(ulong offset, byte[] data)
+{
+    var frame = new List<byte> { 0x06 }; // CRYPTO
+    frame.AddRange(EncodeVarInt(offset));
+    frame.AddRange(EncodeVarInt((ulong)data.Length));
+    frame.AddRange(data);
+    return frame.ToArray();
+}
+
+// Codifica varint QUIC (RFC 9000 §16) cobrindo os valores pequenos usados neste teste.
+static byte[] EncodeVarInt(ulong value)
+{
+    if (value <= 0x3F) return new byte[] { (byte)value };
+    if (value <= 0x3FFF) return new byte[] { (byte)(0x40 | (value >> 8)), (byte)value };
+    throw new InvalidOperationException("valor de teste fora do range coberto por este helper");
 }
 
 // Pacote QUIC Initial real de exemplo, publicado no RFC 9001 Apêndice A.2 —
