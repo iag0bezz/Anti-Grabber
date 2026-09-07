@@ -5,10 +5,12 @@
   { "domain": "ubisoftconnect.com", "allowedProcessNames": ["UbisoftConnect.exe", "upc.exe"] },
   { "domain": "ubisoft.com", "allowedProcessNames": ["UbisoftConnect.exe", "upc.exe"] },
   { "domain": "gog.com", "allowedProcessNames": ["GalaxyClient.exe", "GalaxyCommunication.exe"] },
-  { "domain": "epicgames.com", "allowedProcessNames": ["EpicGamesLauncher.exe", "EpicOnlineServicesUserHelper.exe", "EpicOnlineServicesInstallHelper.exe"] },
-  { "domain": "riotgames.com", "allowedProcessNames": ["RiotClientServices.exe", "LeagueClientUx.exe", "VALORANT.exe"] },
+  { "domain": "epicgames.com", "allowedProcessNames": ["EpicGamesLauncher.exe", "EpicOnlineServicesUserHelper.exe", "EpicOnlineServicesInstallHelper.exe", "EpicWebHelper.exe"] },
+  { "domain": "riotgames.com", "allowedProcessNames": ["RiotClientServices.exe", "LeagueClient.exe", "LeagueClientUx.exe", "VALORANT.exe"] },
   { "domain": "zoom.us", "allowedProcessNames": ["Zoom.exe"] },
   { "domain": "teams.microsoft.com", "allowedProcessNames": ["Teams.exe", "ms-teams.exe"] },
   { "domain": "slack.com", "allowedProcessNames": ["slack.exe"] },
-  { "domain": "spotify.com", "allowedProcessNames": ["Spotify.exe", "SpotifyLauncher.exe", "Discord.exe"] }
+  { "domain": "spotify.com", "allowedProcessNames": ["Spotify.exe", "SpotifyLauncher.exe", "Discord.exe"] },
+  { "domain": "discord.com", "allowedProcessNames": ["Discord.exe", "DiscordCanary.exe", "DiscordPTB.exe", "Update.exe"] },
+  { "domain": "discordapp.com", "allowedProcessNames": ["Discord.exe", "DiscordCanary.exe", "DiscordPTB.exe", "Update.exe"] }
 ]
