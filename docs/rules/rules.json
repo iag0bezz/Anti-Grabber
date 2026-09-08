@@ -11,7 +11,7 @@
   { "domain": "teams.microsoft.com", "allowedProcessNames": ["Teams.exe", "ms-teams.exe"] },
   { "domain": "slack.com", "allowedProcessNames": ["slack.exe"] },
   { "domain": "spotify.com", "allowedProcessNames": ["Spotify.exe", "SpotifyLauncher.exe", "Discord.exe"] },
-  { "domain": "discord.com", "allowedProcessNames": ["Discord.exe", "DiscordCanary.exe", "DiscordPTB.exe", "Update.exe"] },
+  { "domain": "discord.com", "allowedProcessNames": ["Discord.exe", "DiscordCanary.exe", "DiscordPTB.exe", "Update.exe", "msedge.exe"] },
   { "domain": "discordapp.com", "allowedProcessNames": ["Discord.exe", "DiscordCanary.exe", "DiscordPTB.exe", "Update.exe"] },
   { "domain": "steamcommunity.com", "allowedProcessNames": ["msedge.exe", "brave.exe", "firefox.exe", "chrome.exe", "opera.exe"] },
   { "domain": "steampowered.com", "allowedProcessNames": ["msedge.exe", "brave.exe", "firefox.exe", "chrome.exe", "opera.exe"] }
