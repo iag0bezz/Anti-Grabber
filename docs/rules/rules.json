@@ -6,13 +6,14 @@
   { "domain": "ubisoft.com", "allowedProcessNames": ["UbisoftConnect.exe", "upc.exe"] },
   { "domain": "gog.com", "allowedProcessNames": ["GalaxyClient.exe", "GalaxyCommunication.exe"] },
   { "domain": "epicgames.com", "allowedProcessNames": ["EpicGamesLauncher.exe", "EpicOnlineServicesUserHelper.exe", "EpicOnlineServicesInstallHelper.exe", "EpicWebHelper.exe"] },
-  { "domain": "riotgames.com", "allowedProcessNames": ["RiotClientServices.exe", "Riot Client.exe", "LeagueClient.exe", "LeagueClientUx.exe", "League of Legends.exe", "VALORANT.exe"] },
+  { "domain": "riotgames.com", "allowedProcessNames": ["RiotClientServices.exe", "Riot Client.exe", "LeagueClient.exe", "LeagueClientUx.exe", "LeagueClientUxRender.exe", "League of Legends.exe", "VALORANT.exe"] },
   { "domain": "zoom.us", "allowedProcessNames": ["Zoom.exe"] },
-  { "domain": "teams.microsoft.com", "allowedProcessNames": ["Teams.exe", "ms-teams.exe"] },
+  { "domain": "teams.microsoft.com", "allowedProcessNames": ["Teams.exe", "ms-teams.exe", "AppHostRegistrationVerifier.exe"] },
   { "domain": "slack.com", "allowedProcessNames": ["slack.exe"] },
-  { "domain": "spotify.com", "allowedProcessNames": ["Spotify.exe", "SpotifyLauncher.exe", "Discord.exe"] },
+  { "domain": "spotify.com", "allowedProcessNames": ["Spotify.exe", "SpotifyLauncher.exe", "Discord.exe", "AppHostRegistrationVerifier.exe"] },
   { "domain": "discord.com", "allowedProcessNames": ["Discord.exe", "DiscordCanary.exe", "DiscordPTB.exe", "Update.exe", "msedge.exe"] },
   { "domain": "discordapp.com", "allowedProcessNames": ["Discord.exe", "DiscordCanary.exe", "DiscordPTB.exe", "Update.exe"] },
   { "domain": "steamcommunity.com", "allowedProcessNames": ["msedge.exe", "brave.exe", "firefox.exe", "chrome.exe", "opera.exe"] },
-  { "domain": "steampowered.com", "allowedProcessNames": ["msedge.exe", "brave.exe", "firefox.exe", "chrome.exe", "opera.exe"] }
+  { "domain": "steampowered.com", "allowedProcessNames": ["msedge.exe", "brave.exe", "firefox.exe", "chrome.exe", "opera.exe"] },
+  { "domain": "nvidia.com", "allowedProcessNames": ["NVIDIA Overlay.exe"] }
 ]
