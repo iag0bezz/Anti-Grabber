@@ -15,6 +15,7 @@ public sealed class NetworkFilterWorker : BackgroundService
     private readonly CorrelationTracker _correlationTracker;
     private readonly IpcServer _ipcServer;
     private readonly BlockStatsTracker _blockStats;
+    private readonly ProcessNameCache _processNameCache;
     private readonly NetworkFilterOptions _options;
     private readonly ClientHelloReassembler _reassembler = new();
     private readonly QuicClientHelloReassembler _quicReassembler = new();
@@ -25,6 +26,7 @@ public sealed class NetworkFilterWorker : BackgroundService
         CorrelationTracker correlationTracker,
         IpcServer ipcServer,
         BlockStatsTracker blockStats,
+        ProcessNameCache processNameCache,
         IOptions<NetworkFilterOptions> options)
     {
         _logger = logger;
@@ -32,6 +34,7 @@ public sealed class NetworkFilterWorker : BackgroundService
         _correlationTracker = correlationTracker;
         _ipcServer = ipcServer;
         _blockStats = blockStats;
+        _processNameCache = processNameCache;
         _options = options.Value;
     }
 
@@ -260,6 +263,11 @@ public sealed class NetworkFilterWorker : BackgroundService
             : TcpProcessResolver.ResolvePidByLocalPort(localPort, family);
 
         var processName = TryGetProcessName(pid);
+        if (processName is not null && pid is not null)
+            _processNameCache.Record(pid.Value, sni, processName);
+        else if (pid is not null)
+            processName = _processNameCache.TryGetRecent(pid.Value, sni);
+
         if (processName is not null && _whitelist.IsAllowed(sni, processName))
             return true;
 
