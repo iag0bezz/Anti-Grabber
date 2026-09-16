@@ -163,6 +163,38 @@ public sealed class UnifiedAppLocator
         return null;
     }
 
+    // SensitiveSubPaths are always defined relative to the app's user-data root
+    // (RelativeAppDataPaths), which can differ from wherever the exe/install dir
+    // was found (e.g. Discord's exe lives in a versioned %LocalAppData%\Discord\app-x.y.z
+    // folder, but its "Local Storage\leveldb" is under %AppData%\Discord). Resolve
+    // that root directly instead of trusting whichever detection method happened to
+    // win. Local and Roaming AppData can both have a same-named folder (Discord's
+    // install lives under Local, its data under Roaming) so a candidate only counts
+    // if it actually contains one of the sensitive subpaths — matching by folder
+    // name alone picks the wrong root.
+    private static string? ResolveSensitiveBase(SensitiveAppDefinition app)
+    {
+        if (app.RelativeAppDataPaths.Length == 0 || app.SensitiveSubPaths.Length == 0) return null;
+
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+        foreach (var relative in app.RelativeAppDataPaths)
+        {
+            foreach (var basePath in new[] { appData, localAppData })
+            {
+                var candidate = Path.Combine(basePath, relative);
+                var hasSensitiveData = app.SensitiveSubPaths.Any(sub =>
+                {
+                    var target = Path.Combine(candidate, sub);
+                    return Directory.Exists(target) || File.Exists(target);
+                });
+                if (hasSensitiveData) return candidate;
+            }
+        }
+        return null;
+    }
+
     private static string? ScanForExecutable(string root, string exeName, int maxDepth)
     {
         var queue = new Queue<(string Dir, int Depth)>();
@@ -189,8 +221,9 @@ public sealed class UnifiedAppLocator
 
     private static AppInstallInfo BuildInfo(SensitiveAppDefinition app, string installPath, DetectionMethod method)
     {
+        var sensitiveBase = ResolveSensitiveBase(app) ?? installPath;
         var sensitiveDirs = app.SensitiveSubPaths
-            .Select(sub => Path.Combine(installPath, sub))
+            .Select(sub => Path.Combine(sensitiveBase, sub))
             .ToList();
 
         return new AppInstallInfo(
