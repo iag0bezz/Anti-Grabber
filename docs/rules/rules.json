@@ -6,7 +6,7 @@
   { "domain": "ubisoft.com", "allowedProcessNames": ["UbisoftConnect.exe", "upc.exe"] },
   { "domain": "gog.com", "allowedProcessNames": ["GalaxyClient.exe", "GalaxyCommunication.exe"] },
   { "domain": "epicgames.com", "allowedProcessNames": ["EpicGamesLauncher.exe", "EpicOnlineServicesUserHelper.exe", "EpicOnlineServicesInstallHelper.exe", "EpicWebHelper.exe"] },
-  { "domain": "riotgames.com", "allowedProcessNames": ["RiotClientServices.exe", "Riot Client.exe", "LeagueClient.exe", "LeagueClientUx.exe", "LeagueClientUxRender.exe", "League of Legends.exe", "VALORANT.exe", "msedge.exe", "VALORANT-Win64-Shipping.exe"] },
+  { "domain": "riotgames.com", "allowedProcessNames": ["RiotClientServices.exe", "RiotClientServices.old.exe", "Riot Client.exe", "LeagueClient.exe", "LeagueClientUx.exe", "LeagueClientUxRender.exe", "League of Legends.exe", "VALORANT.exe", "msedge.exe", "VALORANT-Win64-Shipping.exe"] },
   { "domain": "zoom.us", "allowedProcessNames": ["Zoom.exe"] },
   { "domain": "teams.microsoft.com", "allowedProcessNames": ["Teams.exe", "ms-teams.exe", "AppHostRegistrationVerifier.exe"] },
   { "domain": "slack.com", "allowedProcessNames": ["slack.exe"] },
