@@ -134,10 +134,14 @@ public sealed class IpcServer : BackgroundService
                 break;
 
             case IpcMessageType.AllowAlwaysCommand when envelope.AllowAlways is not null:
-                _whitelist.AllowAlways(envelope.AllowAlways.Domain, envelope.AllowAlways.ProcessName);
-                _logger.LogInformation(
-                    "Allowlist manual: {Process} liberado para {Domain}.",
-                    envelope.AllowAlways.ProcessName, envelope.AllowAlways.Domain);
+                if (_whitelist.AllowAlways(envelope.AllowAlways.Domain, envelope.AllowAlways.ProcessName))
+                    _logger.LogInformation(
+                        "Allowlist manual: {Process} liberado para {Domain}.",
+                        envelope.AllowAlways.ProcessName, envelope.AllowAlways.Domain);
+                else
+                    _logger.LogWarning(
+                        "Allowlist manual recusada: {Process} executa código de terceiros (jar/script) e não pode ser liberado só pelo nome para {Domain}.",
+                        envelope.AllowAlways.ProcessName, envelope.AllowAlways.Domain);
                 await PublishAsync(new IpcEnvelope { Type = IpcMessageType.AllowAlwaysAck });
                 await PublishRulesSnapshotAsync();
                 break;

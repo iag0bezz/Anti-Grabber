@@ -22,6 +22,17 @@ internal sealed class WhitelistFile
 
 public sealed class DomainWhitelistStore
 {
+    // Hosts que executam código arbitrário (jar, script): o nome do processo não diz
+    // qual código abriu a conexão — um mod malicioso roda no mesmo javaw.exe que um
+    // legítimo. Por isso nunca são liberados só pelo nome, nem por feed nem por usuário.
+    private static readonly HashSet<string> CodeHostProcesses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "java.exe", "javaw.exe", "python.exe", "pythonw.exe", "node.exe",
+        "powershell.exe", "pwsh.exe", "wscript.exe", "cscript.exe", "mshta.exe",
+    };
+
+    public static bool IsCodeHost(string processName) => CodeHostProcesses.Contains(processName);
+
     private readonly object _lock = new();
     private Dictionary<string, HashSet<string>> _catalogEntries = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, AllowRule> _ruleEntries = new(StringComparer.OrdinalIgnoreCase);
@@ -91,8 +102,9 @@ public sealed class DomainWhitelistStore
         }
     }
 
-    public void AllowAlways(string domain, string processName, string source = "user")
+    public bool AllowAlways(string domain, string processName, string source = "user")
     {
+        if (IsCodeHost(processName)) return false;
         lock (_lock)
         {
             var key = RuleKey(domain, processName);
@@ -100,6 +112,7 @@ public sealed class DomainWhitelistStore
             _ruleEntries[key] = new AllowRule(domain, processName, true, createdAt, source);
         }
         Save();
+        return true;
     }
 
     public void RemoveRule(string domain, string processName)
@@ -158,6 +171,7 @@ public sealed class DomainWhitelistStore
 
     public bool IsAllowed(string domain, string processName)
     {
+        if (IsCodeHost(processName)) return false;
         lock (_lock)
         {
             domain = StripPort(domain);
