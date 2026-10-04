@@ -374,6 +374,11 @@ public sealed class TrayForm : Form
                     _revertTimer.Start();
                     ShowBlockNotification(stored);
                     break;
+
+                case IpcMessageType.InvestigationEvent when envelope.Investigation is { } investigation:
+                    var touched = _store.AttachInvestigation(investigation);
+                    if (touched.Count > 0) _bridge?.Send("events-updated", touched);
+                    break;
             }
         });
     }
@@ -641,7 +646,7 @@ public sealed class TrayForm : Form
         static string Escape(object? v) => $"\"{(v?.ToString() ?? "").Replace("\"", "\"\"")}\"";
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine("timestamp,processName,domain,correlatedFileAccess,correlatedFilePath,pid,localPort,plainLanguageMessage");
+        sb.AppendLine("timestamp,processName,domain,correlatedFileAccess,correlatedFilePath,pid,localPort,plainLanguageMessage,protocol,processPath,processSha256,processSigner,parentProcess,findings");
         foreach (var ev in events)
         {
             sb.Append(Escape(ev.Timestamp)).Append(',')
@@ -651,7 +656,15 @@ public sealed class TrayForm : Form
               .Append(Escape(ev.CorrelatedFilePath)).Append(',')
               .Append(Escape(ev.Pid)).Append(',')
               .Append(Escape(ev.LocalPort)).Append(',')
-              .Append(Escape(ev.PlainLanguageMessage)).Append("\r\n");
+              .Append(Escape(ev.PlainLanguageMessage)).Append(',')
+              .Append(Escape(ev.Protocol)).Append(',')
+              .Append(Escape(ev.Investigation?.ProcessPath)).Append(',')
+              .Append(Escape(ev.Investigation?.ProcessSha256)).Append(',')
+              .Append(Escape(ev.Investigation?.ProcessSigner)).Append(',')
+              .Append(Escape(ev.Investigation?.ParentProcessPath ?? ev.Investigation?.ParentProcessName)).Append(',')
+              .Append(Escape(ev.Investigation is null ? null : string.Join(" | ", ev.Investigation.Findings.SelectMany(f =>
+                  f.Indicators.Select(h => $"{f.Path} [{h.Entry}] {h.Label}: {h.Match}{(h.Decoded is null ? "" : " => " + h.Decoded)}")))))
+              .Append("\r\n");
         }
         return sb.ToString();
     }

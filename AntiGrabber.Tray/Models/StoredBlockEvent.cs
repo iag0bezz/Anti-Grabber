@@ -14,6 +14,8 @@ public sealed class StoredBlockEvent
     [JsonPropertyName("pid")] public int? Pid { get; set; }
     [JsonPropertyName("localPort")] public int LocalPort { get; set; }
     [JsonPropertyName("correlatedFilePath")] public string? CorrelatedFilePath { get; set; }
+    [JsonPropertyName("protocol")] public string Protocol { get; set; } = "TCP";
+    [JsonPropertyName("investigation")] public InvestigationPayload? Investigation { get; set; }
 
     public static StoredBlockEvent FromPayload(BlockEventPayload p, string id) => new()
     {
@@ -26,5 +28,7 @@ public sealed class StoredBlockEvent
         Pid = p.Pid,
         LocalPort = p.LocalPort,
         CorrelatedFilePath = p.CorrelatedFilePath,
+        Protocol = p.Protocol,
+        Investigation = p.Investigation,
     };
 }

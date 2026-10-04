@@ -653,6 +653,37 @@ body {
 .detail-row dd { margin: 0; font-weight: 650; text-align: right; word-break: break-word; }
 .detail-row dd.mono { font-family: "Cascadia Mono", "Consolas", monospace; font-size: 11px; font-weight: 500; }
 
+.detail-row dd.mono { white-space: pre-line; user-select: text; }
+
+.detail-section { margin: 4px 0 10px; font-size: 13px; font-weight: 700; }
+.detail-note { margin: 0 0 14px; font-size: 12px; line-height: 1.5; color: var(--text-dim); }
+
+.finding {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-strong);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  user-select: text;
+}
+.finding-title { font-weight: 700; margin-bottom: 4px; }
+.finding-meta { color: var(--text-dim); word-break: break-all; margin-bottom: 2px; }
+.finding .mono { font-family: "Cascadia Mono", "Consolas", monospace; font-size: 11px; }
+.finding-hit { margin-top: 8px; }
+.finding-hit-label { font-weight: 650; margin-bottom: 4px; }
+.finding-match {
+  display: block;
+  margin-top: 2px;
+  padding: 6px 8px;
+  background: var(--accent-dim);
+  border-radius: var(--radius-sm);
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 11px;
+  word-break: break-all;
+  user-select: text;
+}
+
 .detail-allow { width: 100%; justify-content: center; padding: 10px; }
 
 .update-actions { display: flex; flex-direction: column; gap: 8px; }

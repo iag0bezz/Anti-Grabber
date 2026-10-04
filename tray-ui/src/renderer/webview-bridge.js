@@ -49,6 +49,7 @@
     onConnectionStatus: (cb) => on('connection-status', cb),
     onStatus: (cb) => on('status', cb),
     onBlockEvent: (cb) => on('block-event', cb),
+    onEventsUpdated: (cb) => on('events-updated', cb),
     onOpenEventDetail: (cb) => on('open-event-detail', cb),
     onRulesSnapshot: (cb) => on('rules-snapshot', cb),
     onRulesStatus: (cb) => on('rules-status', cb),

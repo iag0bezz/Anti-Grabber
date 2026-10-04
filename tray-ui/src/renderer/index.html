@@ -106,7 +106,7 @@
                 <span x-text="t('feed.fileChip')"></span>
               </span>
               <span class="feed-time" x-text="formatRowTime(ev.timestamp)"></span>
-              <button class="allow-btn" :class="{ done: isAllowed(ev.domain, ev.processName) }" :disabled="isAllowed(ev.domain, ev.processName)" @click.stop="allow(ev)">
+              <button x-show="!isCodeHost(ev.processName)" class="allow-btn" :class="{ done: isAllowed(ev.domain, ev.processName) }" :disabled="isAllowed(ev.domain, ev.processName)" @click.stop="allow(ev)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
                 <span x-text="isAllowed(ev.domain, ev.processName) ? t('feed.allowed') : t('feed.allow')"></span>
               </button>
@@ -359,12 +359,46 @@
           <div class="detail-row" x-show="detailEvent.pid"><dt x-text="t('detail.pid')"></dt><dd x-text="detailEvent.pid"></dd></div>
           <div class="detail-row" x-show="detailEvent.localPort"><dt x-text="t('detail.localPort')"></dt><dd x-text="detailEvent.localPort"></dd></div>
           <div class="detail-row"><dt x-text="t('detail.domain')"></dt><dd x-text="detailEvent.domain"></dd></div>
-          <div class="detail-row"><dt x-text="t('detail.protocol')"></dt><dd x-text="t('detail.protocolValue')"></dd></div>
+          <div class="detail-row"><dt x-text="t('detail.protocol')"></dt><dd x-text="detailEvent.protocol === 'QUIC' ? t('detail.protocolQuic') : t('detail.protocolValue')"></dd></div>
           <div class="detail-row"><dt x-text="t('detail.timestamp')"></dt><dd x-text="formatFullTime(detailEvent.timestamp)"></dd></div>
           <div class="detail-row"><dt x-text="t('detail.correlated')"></dt><dd x-text="detailEvent.correlatedFileAccess ? t('detail.correlatedYes') : t('detail.correlatedNo')"></dd></div>
           <div class="detail-row" x-show="detailEvent.correlatedFilePath"><dt x-text="t('detail.filePath')"></dt><dd class="mono" x-text="detailEvent.correlatedFilePath"></dd></div>
         </dl>
-        <button class="allow-btn detail-allow" :class="{ done: isAllowed(detailEvent.domain, detailEvent.processName) }" :disabled="isAllowed(detailEvent.domain, detailEvent.processName)" @click="allow(detailEvent)">
+
+        <h3 class="detail-section" x-text="t('inv.title')"></h3>
+        <p class="detail-note" x-show="!detailEvent.investigation" x-text="t('inv.pending')"></p>
+        <template x-if="detailEvent.investigation">
+          <div>
+            <dl class="detail-tech">
+              <div class="detail-row" x-show="detailEvent.investigation.processPath"><dt x-text="t('inv.path')"></dt><dd class="mono" x-text="detailEvent.investigation.processPath"></dd></div>
+              <div class="detail-row" x-show="detailEvent.investigation.processSha256"><dt>SHA-256</dt><dd class="mono" x-text="detailEvent.investigation.processSha256"></dd></div>
+              <div class="detail-row"><dt x-text="t('inv.signature')"></dt><dd x-text="signatureText(detailEvent.investigation)"></dd></div>
+              <div class="detail-row" x-show="detailEvent.investigation.processStartTime"><dt x-text="t('inv.started')"></dt><dd x-text="formatFullTime(detailEvent.investigation.processStartTime)"></dd></div>
+              <div class="detail-row" x-show="detailEvent.investigation.parentPid"><dt x-text="t('inv.parent')"></dt><dd class="mono" x-text="(detailEvent.investigation.parentProcessPath || detailEvent.investigation.parentProcessName || '?') + ' (PID ' + detailEvent.investigation.parentPid + ')'"></dd></div>
+              <div class="detail-row" x-show="detailEvent.investigation.scanTargets.length"><dt x-text="t('inv.targets')"></dt><dd class="mono" x-text="detailEvent.investigation.scanTargets.join('\n') + '\n(' + detailEvent.investigation.filesScanned + ' ' + t('inv.filesScanned') + ')'"></dd></div>
+              <div class="detail-row" x-show="detailEvent.investigation.note"><dt x-text="t('inv.note')"></dt><dd x-text="detailEvent.investigation.note"></dd></div>
+            </dl>
+            <p class="detail-note" x-show="isCodeHost(detailEvent.processName) && detailEvent.investigation.scanTargets.length && !detailEvent.investigation.findings.length" x-text="t('inv.clean')"></p>
+            <template x-for="f in detailEvent.investigation.findings" :key="f.path">
+              <div class="finding">
+                <div class="finding-title" x-text="(f.modName || f.modId || f.path.split(/[\\/]/).pop()) + (f.modVersion ? ' ' + f.modVersion : '')"></div>
+                <div class="finding-meta mono" x-text="f.path"></div>
+                <div class="finding-meta mono" x-show="f.sha256" x-text="'SHA-256 ' + f.sha256"></div>
+                <div class="finding-meta" x-show="f.lastWriteTime" x-text="t('inv.modified') + ' ' + formatFullTime(f.lastWriteTime) + ' · ' + f.sizeBytes + ' bytes'"></div>
+                <template x-for="(h, i) in f.indicators" :key="i">
+                  <div class="finding-hit">
+                    <div class="finding-hit-label" x-text="h.label + ' — ' + h.entry"></div>
+                    <code class="finding-match" x-text="h.match"></code>
+                    <code class="finding-match" x-show="h.decoded" x-text="'→ ' + h.decoded"></code>
+                  </div>
+                </template>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <p class="detail-note" x-show="isCodeHost(detailEvent.processName)" x-text="t('inv.codeHostNoAllow')"></p>
+        <button x-show="!isCodeHost(detailEvent.processName)" class="allow-btn detail-allow" :class="{ done: isAllowed(detailEvent.domain, detailEvent.processName) }" :disabled="isAllowed(detailEvent.domain, detailEvent.processName)" @click="allow(detailEvent)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
           <span x-text="isAllowed(detailEvent.domain, detailEvent.processName) ? t('detail.allowed') : t('detail.allow')"></span>
         </button>

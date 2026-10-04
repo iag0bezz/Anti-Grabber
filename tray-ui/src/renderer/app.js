@@ -74,6 +74,14 @@ function app() {
         if (this.page === 1 && this.tab === 'feed') this.loadFeed();
       });
 
+      // Investigação chega segundos depois do bloqueio — atualiza lista e modal aberto.
+      window.antigrabber.onEventsUpdated(async (ids) => {
+        if (this.tab === 'feed') this.loadFeed();
+        if (this.detailEvent && ids.includes(this.detailEvent.id)) {
+          this.detailEvent = await window.antigrabber.getEvent(this.detailEvent.id);
+        }
+      });
+
       window.antigrabber.onOpenEventDetail((id) => {
         this.tab = 'feed';
         this.openDetailById(id);
@@ -156,6 +164,21 @@ function app() {
       this.page = result.page;
       this.totalPages = result.totalPages;
       this.loading = false;
+    },
+
+    // Espelha DomainWhitelistStore.IsCodeHost: o serviço recusa liberar esses só pelo nome.
+    isCodeHost(processName) {
+      return ['java.exe', 'javaw.exe', 'python.exe', 'pythonw.exe', 'node.exe',
+        'powershell.exe', 'pwsh.exe', 'wscript.exe', 'cscript.exe', 'mshta.exe']
+        .includes((processName || '').toLowerCase());
+    },
+
+    signatureText(inv) {
+      if (inv.processSigned === true) return this.t('inv.signedValid', { signer: inv.processSigner || '?' });
+      if (inv.processSigned === false) {
+        return inv.processSigner ? this.t('inv.signedInvalid', { signer: inv.processSigner }) : this.t('inv.unsigned');
+      }
+      return '?';
     },
 
     isAllowed(domain, processName) {

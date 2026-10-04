@@ -1,3 +1,4 @@
+using AntiGrabber.Shared;
 using System.Text.Json;
 using AntiGrabber.Tray.Models;
 
@@ -131,6 +132,26 @@ public sealed class Store
             if (_events.Count > MaxEvents) _events.RemoveRange(MaxEvents, _events.Count - MaxEvents);
             SaveEvents();
             return ev;
+        }
+    }
+
+    /// A investigação chega depois do bloqueio (roda em segundo plano no serviço):
+    /// anexa a todo evento do mesmo processo que ainda não tem, e devolve os ids tocados.
+    public List<string> AttachInvestigation(InvestigationPayload inv)
+    {
+        lock (_lock)
+        {
+            var since = inv.ProcessStartTime ?? inv.Timestamp.AddMinutes(-15);
+            var touched = new List<string>();
+            foreach (var ev in _events)
+            {
+                if (ev.Investigation is not null || ev.Pid != inv.Pid || ev.Timestamp < since) continue;
+                if (!string.Equals(ev.ProcessName, inv.ProcessName, StringComparison.OrdinalIgnoreCase)) continue;
+                ev.Investigation = inv;
+                touched.Add(ev.Id);
+            }
+            if (touched.Count > 0) SaveEvents();
+            return touched;
         }
     }
 
