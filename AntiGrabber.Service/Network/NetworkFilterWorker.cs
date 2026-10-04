@@ -16,6 +16,7 @@ public sealed class NetworkFilterWorker : BackgroundService
     private readonly IpcServer _ipcServer;
     private readonly BlockStatsTracker _blockStats;
     private readonly ProcessNameCache _processNameCache;
+    private readonly BlockInvestigator _blockInvestigator;
     private readonly NetworkFilterOptions _options;
     private readonly ClientHelloReassembler _reassembler = new();
     private readonly QuicClientHelloReassembler _quicReassembler = new();
@@ -27,6 +28,7 @@ public sealed class NetworkFilterWorker : BackgroundService
         IpcServer ipcServer,
         BlockStatsTracker blockStats,
         ProcessNameCache processNameCache,
+        BlockInvestigator blockInvestigator,
         IOptions<NetworkFilterOptions> options)
     {
         _logger = logger;
@@ -35,6 +37,7 @@ public sealed class NetworkFilterWorker : BackgroundService
         _ipcServer = ipcServer;
         _blockStats = blockStats;
         _processNameCache = processNameCache;
+        _blockInvestigator = blockInvestigator;
         _options = options.Value;
     }
 
@@ -279,6 +282,9 @@ public sealed class NetworkFilterWorker : BackgroundService
             "Bloqueado: {Process} (pid={Pid}) tentou conectar em {Domain}. Acesso a arquivo sensível recente: {Correlated}",
             processName ?? "desconhecido", pid?.ToString() ?? "?", sni, correlatedFileAccess);
 
+        if (pid is not null)
+            _blockInvestigator.InvestigateBlock(pid.Value, processName ?? "desconhecido", sni);
+
         await _ipcServer.PublishAsync(new IpcEnvelope
         {
             Type = IpcMessageType.BlockEvent,
@@ -291,6 +297,8 @@ public sealed class NetworkFilterWorker : BackgroundService
                 Pid = pid,
                 LocalPort = localPort,
                 CorrelatedFilePath = correlatedFilePath,
+                Protocol = isUdp ? "QUIC" : "TCP",
+                Investigation = pid is not null ? _blockInvestigator.TryGetCached(pid.Value) : null,
                 PlainLanguageMessage = correlatedFileAccess
                     ? $"Bloqueamos uma tentativa de roubo: {processName ?? "um programa"} tentou enviar dados para {sni} logo após acessar seus arquivos."
                     : $"Bloqueamos uma conexão suspeita: {processName ?? "um programa"} tentou falar com {sni} sem autorização.",

