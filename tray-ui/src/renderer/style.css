@@ -430,7 +430,8 @@ body {
 }
 .rule-process { font-weight: 650; flex-shrink: 0; }
 .rule-arrow { color: var(--text-dim); flex-shrink: 0; }
-.rule-domain { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rule-domain { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 0; min-width: 0; }
+.rule-info:has(.rule-context) { flex-wrap: wrap; }
 
 .rule-switch { padding: 0; flex-shrink: 0; }
 
@@ -668,6 +669,9 @@ body {
   user-select: text;
 }
 .finding-title { font-weight: 700; margin-bottom: 4px; }
+.finding:not(.finding-top) { border-left-color: var(--border); }
+.detail-note.mono { font-family: "Cascadia Mono", "Consolas", monospace; font-size: 11px; word-break: break-all; user-select: text; }
+.rule-context { flex-basis: 100%; font-size: 11px; color: var(--text-dim); }
 .finding-meta { color: var(--text-dim); word-break: break-all; margin-bottom: 2px; }
 .finding .mono { font-family: "Cascadia Mono", "Consolas", monospace; font-size: 11px; }
 .finding-hit { margin-top: 8px; }

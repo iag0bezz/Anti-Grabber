@@ -56,9 +56,9 @@
     onUpdateAvailable: (cb) => on('update-available', cb),
     onUpdateProgress: (cb) => on('update-progress', cb),
 
-    allowAlways: (domain, processName) => call('allow-always', { domain, processName }),
-    removeRule: (domain, processName) => call('remove-rule', { domain, processName }),
-    setRuleEnabled: (domain, processName, enabled) => call('set-rule-enabled', { domain, processName, enabled }),
+    allowAlways: (domain, processName, fingerprint, context) => call('allow-always', { domain, processName, fingerprint, context }),
+    removeRule: (domain, processName, fingerprint) => call('remove-rule', { domain, processName, fingerprint }),
+    setRuleEnabled: (domain, processName, enabled, fingerprint) => call('set-rule-enabled', { domain, processName, enabled, fingerprint }),
     isConnected: () => call('is-connected'),
 
     getEvents: (query) => call('get-events', query),

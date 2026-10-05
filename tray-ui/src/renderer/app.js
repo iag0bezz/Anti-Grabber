@@ -183,13 +183,37 @@ function app() {
 
     isAllowed(domain, processName) {
       return this.rules.some((r) =>
-        r.enabled &&
+        r.enabled && !r.fingerprint &&
         r.domain.toLowerCase() === (domain || '').toLowerCase() &&
         r.processName.toLowerCase() === (processName || '').toLowerCase());
     },
 
     async allow(ev) {
       await window.antigrabber.allowAlways(ev.domain, ev.processName);
+    },
+
+    // Host de código só libera preso ao conjunto atual de mods/scripts — e só se a
+    // investigação não achou nada e não houve leitura de arquivo sensível.
+    canAllowHost(ev) {
+      const inv = ev && ev.investigation;
+      return !!(inv && inv.fingerprint && !inv.findings.length && !ev.correlatedFileAccess);
+    },
+
+    isHostAllowed(ev) {
+      const fp = ev && ev.investigation && ev.investigation.fingerprint;
+      return !!fp && this.rules.some((r) =>
+        r.enabled && r.fingerprint === fp &&
+        r.domain.toLowerCase() === (ev.domain || '').toLowerCase() &&
+        r.processName.toLowerCase() === (ev.processName || '').toLowerCase());
+    },
+
+    async allowHost(ev) {
+      const inv = ev.investigation;
+      await window.antigrabber.allowAlways(ev.domain, ev.processName, inv.fingerprint, inv.context);
+    },
+
+    contextLabel(path) {
+      return (path || '').split(/[\\/]/).filter(Boolean).pop() || path || '';
     },
 
     async addRule() {
@@ -202,11 +226,11 @@ function app() {
     },
 
     async toggleRule(rule) {
-      await window.antigrabber.setRuleEnabled(rule.domain, rule.processName, !rule.enabled);
+      await window.antigrabber.setRuleEnabled(rule.domain, rule.processName, !rule.enabled, rule.fingerprint);
     },
 
     async revokeRule(rule) {
-      await window.antigrabber.removeRule(rule.domain, rule.processName);
+      await window.antigrabber.removeRule(rule.domain, rule.processName, rule.fingerprint);
     },
 
     openDetail(ev) {

@@ -146,12 +146,13 @@
         </div>
 
         <ul class="feed-list">
-          <template x-for="rule in rules" :key="rule.domain + '|' + rule.processName">
+          <template x-for="rule in rules" :key="rule.domain + '|' + rule.processName + '|' + (rule.fingerprint || '')">
             <li class="rule-row" :class="{ disabled: !rule.enabled }">
               <div class="rule-info">
                 <span class="rule-process" x-text="rule.processName"></span>
                 <span class="rule-arrow">→</span>
                 <span class="rule-domain" x-text="rule.domain"></span>
+                <span class="rule-context" x-show="rule.fingerprint" :title="rule.context" x-text="t('exceptions.hostScope', { context: contextLabel(rule.context) })"></span>
               </div>
               <span class="feed-time" x-text="t('exceptions.since', { date: formatRowTime(rule.createdAt) })"></span>
               <label class="switch-row rule-switch" :title="rule.enabled ? t('exceptions.disable') : t('exceptions.enable')">
@@ -379,6 +380,23 @@
               <div class="detail-row" x-show="detailEvent.investigation.note"><dt x-text="t('inv.note')"></dt><dd x-text="detailEvent.investigation.note"></dd></div>
             </dl>
             <p class="detail-note" x-show="isCodeHost(detailEvent.processName) && detailEvent.investigation.scanTargets.length && !detailEvent.investigation.findings.length" x-text="t('inv.clean')"></p>
+            <template x-if="detailEvent.investigation.gameLogPath">
+              <div>
+                <h3 class="detail-section" x-text="t('inv.logTitle')"></h3>
+                <p class="detail-note mono" x-text="detailEvent.investigation.gameLogPath"></p>
+                <p class="detail-note" x-show="!detailEvent.investigation.logSuspects.length" x-text="t('inv.logNone')"></p>
+                <template x-for="(s, i) in detailEvent.investigation.logSuspects" :key="s.source">
+                  <div class="finding" :class="{ 'finding-top': i === 0 }">
+                    <div class="finding-title" x-text="(i === 0 ? t('inv.logTop') + ' ' : '') + (s.modName || s.modId || s.source)"></div>
+                    <div class="finding-meta" x-text="t('inv.logSource', { source: s.source, score: s.score })"></div>
+                    <div class="finding-meta mono" x-show="s.modFile" x-text="s.modFile"></div>
+                    <template x-for="(line, j) in s.lines" :key="j">
+                      <code class="finding-match" x-text="line"></code>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </template>
             <template x-for="f in detailEvent.investigation.findings" :key="f.path">
               <div class="finding">
                 <div class="finding-title" x-text="(f.modName || f.modId || f.path.split(/[\\/]/).pop()) + (f.modVersion ? ' ' + f.modVersion : '')"></div>
@@ -397,7 +415,16 @@
           </div>
         </template>
 
-        <p class="detail-note" x-show="isCodeHost(detailEvent.processName)" x-text="t('inv.codeHostNoAllow')"></p>
+        <template x-if="isCodeHost(detailEvent.processName) && canAllowHost(detailEvent)">
+          <div>
+            <p class="detail-note" x-text="t('inv.hostAllowNote')"></p>
+            <button class="allow-btn detail-allow" :class="{ done: isHostAllowed(detailEvent) }" :disabled="isHostAllowed(detailEvent)" @click="allowHost(detailEvent)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+              <span x-text="isHostAllowed(detailEvent) ? t('inv.hostAllowed') : t('inv.hostAllow', { context: contextLabel(detailEvent.investigation.context), domain: detailEvent.domain })"></span>
+            </button>
+          </div>
+        </template>
+        <p class="detail-note" x-show="isCodeHost(detailEvent.processName) && !canAllowHost(detailEvent)" x-text="t('inv.codeHostNoAllow')"></p>
         <button x-show="!isCodeHost(detailEvent.processName)" class="allow-btn detail-allow" :class="{ done: isAllowed(detailEvent.domain, detailEvent.processName) }" :disabled="isAllowed(detailEvent.domain, detailEvent.processName)" @click="allow(detailEvent)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
           <span x-text="isAllowed(detailEvent.domain, detailEvent.processName) ? t('detail.allowed') : t('detail.allow')"></span>

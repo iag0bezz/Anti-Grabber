@@ -535,20 +535,20 @@ public sealed class TrayForm : Form
                 {
                     foreach (var ruleEl in rulesEl.EnumerateArray())
                     {
-                        var (domain, processName) = ReadDomainProcess(ruleEl);
+                        var (domain, processName, fingerprint, context) = ReadDomainProcess(ruleEl);
                         if (domain.Length == 0 || processName.Length == 0) continue;
                         var enabled = !ruleEl.TryGetProperty("enabled", out var en) || en.ValueKind != JsonValueKind.False;
 
                         await _pipe.SendAsync(new IpcEnvelope
                         {
                             Type = IpcMessageType.AllowAlwaysCommand,
-                            AllowAlways = new AllowAlwaysPayload { Domain = domain, ProcessName = processName },
+                            AllowAlways = new AllowAlwaysPayload { Domain = domain, ProcessName = processName, Fingerprint = fingerprint, Context = context },
                         });
                         if (!enabled)
                             await _pipe.SendAsync(new IpcEnvelope
                             {
                                 Type = IpcMessageType.SetRuleEnabledCommand,
-                                SetRuleEnabled = new SetRuleEnabledPayload { Domain = domain, ProcessName = processName, Enabled = false },
+                                SetRuleEnabled = new SetRuleEnabledPayload { Domain = domain, ProcessName = processName, Enabled = false, Fingerprint = fingerprint },
                             });
                     }
                 }
@@ -593,41 +593,40 @@ public sealed class TrayForm : Form
 
         bridge.On("allow-always", async args =>
         {
-            var (domain, processName) = ReadDomainProcess(args);
+            var (domain, processName, fingerprint, context) = ReadDomainProcess(args);
             return await _pipe.SendAsync(new IpcEnvelope
             {
                 Type = IpcMessageType.AllowAlwaysCommand,
-                AllowAlways = new AllowAlwaysPayload { Domain = domain, ProcessName = processName },
+                AllowAlways = new AllowAlwaysPayload { Domain = domain, ProcessName = processName, Fingerprint = fingerprint, Context = context },
             });
         });
 
         bridge.On("remove-rule", async args =>
         {
-            var (domain, processName) = ReadDomainProcess(args);
+            var (domain, processName, fingerprint, context) = ReadDomainProcess(args);
             return await _pipe.SendAsync(new IpcEnvelope
             {
                 Type = IpcMessageType.RemoveRuleCommand,
-                RemoveRule = new AllowAlwaysPayload { Domain = domain, ProcessName = processName },
+                RemoveRule = new AllowAlwaysPayload { Domain = domain, ProcessName = processName, Fingerprint = fingerprint },
             });
         });
 
         bridge.On("set-rule-enabled", async args =>
         {
-            var (domain, processName) = ReadDomainProcess(args);
+            var (domain, processName, fingerprint, context) = ReadDomainProcess(args);
             var enabled = args.TryGetProperty("enabled", out var en) && en.ValueKind == JsonValueKind.True;
             return await _pipe.SendAsync(new IpcEnvelope
             {
                 Type = IpcMessageType.SetRuleEnabledCommand,
-                SetRuleEnabled = new SetRuleEnabledPayload { Domain = domain, ProcessName = processName, Enabled = enabled },
+                SetRuleEnabled = new SetRuleEnabledPayload { Domain = domain, ProcessName = processName, Enabled = enabled, Fingerprint = fingerprint },
             });
         });
     }
 
-    private static (string domain, string processName) ReadDomainProcess(JsonElement args)
+    private static (string domain, string processName, string? fingerprint, string? context) ReadDomainProcess(JsonElement args)
     {
-        var domain = args.ValueKind == JsonValueKind.Object && args.TryGetProperty("domain", out var d) ? d.GetString() ?? "" : "";
-        var processName = args.ValueKind == JsonValueKind.Object && args.TryGetProperty("processName", out var p) ? p.GetString() ?? "" : "";
-        return (domain, processName);
+        string? Read(string name) => args.ValueKind == JsonValueKind.Object && args.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+        return (Read("domain") ?? "", Read("processName") ?? "", Read("fingerprint"), Read("context"));
     }
 
     private static EventQuery ParseEventQuery(JsonElement args)
