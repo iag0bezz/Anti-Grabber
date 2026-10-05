@@ -274,6 +274,29 @@ public sealed class NetworkFilterWorker : BackgroundService
         if (processName is not null && _whitelist.IsAllowed(sni, processName))
             return true;
 
+        // Host de código (javaw, python...) liberado pelo usuário pra ESTE conjunto de
+        // mods/scripts. Nunca vale se o processo acabou de ler arquivo sensível ou se a
+        // investigação achou indicador de stealer.
+        if (processName is not null && pid is not null
+            && DomainWhitelistStore.IsCodeHost(processName)
+            && _whitelist.HasFingerprintRule(sni, processName)
+            && !_correlationTracker.HasRecentFileAccess(pid.Value)
+            && (_blockInvestigator.TryGetCached(pid.Value)?.Findings.Length ?? 0) == 0)
+        {
+            var fingerprint = _blockInvestigator.TryGetHostFingerprint(pid.Value, processName, out var pending);
+            if (fingerprint is not null && _whitelist.IsAllowed(sni, processName, fingerprint))
+                return true;
+            if (pending)
+            {
+                // Conjunto liberado pelo usuário ainda sendo conferido (hash dos jars): segura
+                // sem alarde — o mod tenta de novo e passa assim que o hash bater.
+                _logger.LogInformation(
+                    "Aguardando conferência do conjunto de mods/scripts de {Process} (pid={Pid}) antes de liberar {Domain}.",
+                    processName, pid, sni);
+                return false;
+            }
+        }
+
         var correlatedFileAccess = pid is not null && _correlationTracker.HasRecentFileAccess(pid.Value);
         var correlatedFilePath = pid is not null ? _correlationTracker.TryGetRecentFilePath(pid.Value) : null;
         _blockStats.RecordBlock();

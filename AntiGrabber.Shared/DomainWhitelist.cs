@@ -12,7 +12,11 @@ public sealed record AllowRule(
     [property: JsonPropertyName("processName")] string ProcessName,
     [property: JsonPropertyName("enabled")] bool Enabled,
     [property: JsonPropertyName("createdAt")] DateTimeOffset CreatedAt,
-    [property: JsonPropertyName("source")] string Source = "user");
+    [property: JsonPropertyName("source")] string Source = "user",
+    // Só pra host de código (javaw, python...): liberação presa ao conjunto exato de
+    // jars/scripts que o processo roda. Mudou um mod → impressão digital muda → bloqueia.
+    [property: JsonPropertyName("fingerprint")] string? Fingerprint = null,
+    [property: JsonPropertyName("context")] string? Context = null);
 
 internal sealed class WhitelistFile
 {
@@ -60,7 +64,7 @@ public sealed class DomainWhitelistStore
                 if (file is null) return;
 
                 foreach (var rule in file.Rules)
-                    _ruleEntries[RuleKey(rule.Domain, rule.ProcessName)] = rule;
+                    _ruleEntries[RuleKey(rule.Domain, rule.ProcessName, rule.Fingerprint)] = rule;
                 foreach (var domain in file.SensitiveDomains)
                     _sensitiveDomains.Add(domain);
             }
@@ -102,33 +106,34 @@ public sealed class DomainWhitelistStore
         }
     }
 
-    public bool AllowAlways(string domain, string processName, string source = "user")
+    /// Host de código só aceita liberação com impressão digital do conjunto de mods/scripts.
+    public bool AllowAlways(string domain, string processName, string source = "user", string? fingerprint = null, string? context = null)
     {
-        if (IsCodeHost(processName)) return false;
+        if (IsCodeHost(processName) ? string.IsNullOrEmpty(fingerprint) : fingerprint is not null) return false;
         lock (_lock)
         {
-            var key = RuleKey(domain, processName);
+            var key = RuleKey(domain, processName, fingerprint);
             var createdAt = _ruleEntries.TryGetValue(key, out var existing) ? existing.CreatedAt : DateTimeOffset.UtcNow;
-            _ruleEntries[key] = new AllowRule(domain, processName, true, createdAt, source);
+            _ruleEntries[key] = new AllowRule(domain, processName, true, createdAt, source, fingerprint, context);
         }
         Save();
         return true;
     }
 
-    public void RemoveRule(string domain, string processName)
+    public void RemoveRule(string domain, string processName, string? fingerprint = null)
     {
         lock (_lock)
         {
-            _ruleEntries.Remove(RuleKey(domain, processName));
+            _ruleEntries.Remove(RuleKey(domain, processName, fingerprint));
         }
         Save();
     }
 
-    public void SetRuleEnabled(string domain, string processName, bool enabled)
+    public void SetRuleEnabled(string domain, string processName, bool enabled, string? fingerprint = null)
     {
         lock (_lock)
         {
-            var key = RuleKey(domain, processName);
+            var key = RuleKey(domain, processName, fingerprint);
             if (_ruleEntries.TryGetValue(key, out var existing))
                 _ruleEntries[key] = existing with { Enabled = enabled };
         }
@@ -169,9 +174,33 @@ public sealed class DomainWhitelistStore
         Save();
     }
 
-    public bool IsAllowed(string domain, string processName)
+    /// Existe liberação por impressão digital pra esse host/domínio? Só aí vale a pena
+    /// calcular a impressão do processo no caminho do pacote.
+    public bool HasFingerprintRule(string domain, string processName)
     {
-        if (IsCodeHost(processName)) return false;
+        lock (_lock)
+        {
+            domain = StripPort(domain);
+            return _ruleEntries.Values.Any(r => r.Enabled && r.Fingerprint is not null
+                && MatchesDomain(domain, r.Domain)
+                && string.Equals(r.ProcessName, processName, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    public bool IsAllowed(string domain, string processName, string? fingerprint = null)
+    {
+        if (IsCodeHost(processName))
+        {
+            if (fingerprint is null) return false;
+            lock (_lock)
+            {
+                domain = StripPort(domain);
+                return _ruleEntries.Values.Any(r => r.Enabled && r.Fingerprint == fingerprint
+                    && MatchesDomain(domain, r.Domain)
+                    && string.Equals(r.ProcessName, processName, StringComparison.OrdinalIgnoreCase));
+            }
+        }
+
         lock (_lock)
         {
             domain = StripPort(domain);
@@ -211,7 +240,8 @@ public sealed class DomainWhitelistStore
         return idx < 0 ? domain : domain[..idx];
     }
 
-    private static string RuleKey(string domain, string processName) => $"{domain}|{processName}";
+    private static string RuleKey(string domain, string processName, string? fingerprint = null)
+        => fingerprint is null ? $"{domain}|{processName}" : $"{domain}|{processName}|{fingerprint}";
 
     private void AddCatalog(string domain, IEnumerable<string> processNames)
     {

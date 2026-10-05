@@ -134,10 +134,12 @@ public sealed class IpcServer : BackgroundService
                 break;
 
             case IpcMessageType.AllowAlwaysCommand when envelope.AllowAlways is not null:
-                if (_whitelist.AllowAlways(envelope.AllowAlways.Domain, envelope.AllowAlways.ProcessName))
+                var allow = envelope.AllowAlways;
+                if (_whitelist.AllowAlways(allow.Domain, allow.ProcessName, "user", allow.Fingerprint, allow.Context))
                     _logger.LogInformation(
-                        "Allowlist manual: {Process} liberado para {Domain}.",
-                        envelope.AllowAlways.ProcessName, envelope.AllowAlways.Domain);
+                        "Allowlist manual: {Process} liberado para {Domain}{Scope}.",
+                        allow.ProcessName, allow.Domain,
+                        allow.Fingerprint is null ? "" : $" só com o conjunto atual de mods/scripts de {allow.Context} (impressão {allow.Fingerprint})");
                 else
                     _logger.LogWarning(
                         "Allowlist manual recusada: {Process} executa código de terceiros (jar/script) e não pode ser liberado só pelo nome para {Domain}.",
@@ -147,7 +149,7 @@ public sealed class IpcServer : BackgroundService
                 break;
 
             case IpcMessageType.RemoveRuleCommand when envelope.RemoveRule is not null:
-                _whitelist.RemoveRule(envelope.RemoveRule.Domain, envelope.RemoveRule.ProcessName);
+                _whitelist.RemoveRule(envelope.RemoveRule.Domain, envelope.RemoveRule.ProcessName, envelope.RemoveRule.Fingerprint);
                 _logger.LogInformation(
                     "Allowlist manual: exceção revogada {Process}/{Domain}.",
                     envelope.RemoveRule.ProcessName, envelope.RemoveRule.Domain);
@@ -156,7 +158,8 @@ public sealed class IpcServer : BackgroundService
 
             case IpcMessageType.SetRuleEnabledCommand when envelope.SetRuleEnabled is not null:
                 _whitelist.SetRuleEnabled(
-                    envelope.SetRuleEnabled.Domain, envelope.SetRuleEnabled.ProcessName, envelope.SetRuleEnabled.Enabled);
+                    envelope.SetRuleEnabled.Domain, envelope.SetRuleEnabled.ProcessName, envelope.SetRuleEnabled.Enabled,
+                    envelope.SetRuleEnabled.Fingerprint);
                 _logger.LogInformation(
                     "Allowlist manual: exceção {Process}/{Domain} {State}.",
                     envelope.SetRuleEnabled.ProcessName, envelope.SetRuleEnabled.Domain,
@@ -179,6 +182,8 @@ public sealed class IpcServer : BackgroundService
                 ProcessName = r.ProcessName,
                 Enabled = r.Enabled,
                 CreatedAt = r.CreatedAt,
+                Fingerprint = r.Fingerprint,
+                Context = r.Context,
             })
             .ToArray();
 

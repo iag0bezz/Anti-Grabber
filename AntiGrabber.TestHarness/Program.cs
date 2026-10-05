@@ -594,10 +594,70 @@ static int RunJarScanSelfTest()
     Assert(ps.Inline.Count == 1 && BlockInvestigator.FindHits(ps.Inline[0].Text, ps.Inline[0].Source).Any(h => h.Match == webhook),
         "webhook dentro de -EncodedCommand não foi achado");
 
-    Assert(!new DomainWhitelistStore(Path.Combine(Path.GetTempPath(), $"ag-selftest-{Guid.NewGuid()}.json")).AllowAlways("discord.com", "javaw.exe"),
-        "javaw.exe não deveria poder ser liberado só pelo nome");
+    // Log do jogo: linhas reais do CraftPresence (Fabric) + mesmo evento no formato Forge.
+    // UniLib cita HTTP (fraco) e Render thread é genérica — CraftPresence tem que liderar.
+    var mods = new List<(string, BlockInvestigator.ModMetadata?)>
+    {
+        (@"C:\g\mods\CraftPresence-2.7.1+1.21.1-fabric.jar", new("craftpresence", "CraftPresence", "2.7.1")),
+        (@"C:\g\mods\UniLib-1.2.1+1.21.1-fabric.jar", new("unilib", "UniLib", "1.2.1")),
+        (@"C:\g\mods\sodium-fabric-0.6.13.jar", new("sodium", "Sodium", "0.6.13")),
+    };
+    var fabricLog = new[]
+    {
+        "[20:52:56] [UniLib/INFO]: Starting version check for \"craftpresence\" (MC 1.21.1) at \"https://raw.githubusercontent.com/CDAGaming/VersionLibrary/master/CraftPresence/update.json\"",
+        "[20:52:57] [CraftPresence/INFO]: Checking Discord for available assets with Client Id: 1042681781775769610",
+        "[20:52:57] [Render thread/WARN]: Connecting to discord.com via render thread",
+        "[20:53:12] [CraftPresence/ERROR]: Unable to get Discord assets, things may not work well...",
+        "[20:53:12] [CraftPresence/INFO]: Attempting to connect to Discord (1/10)...",
+        "[20:58:00] [EvilThread/INFO]: discord.com fora da janela",
+        "\tat java.base/java.lang.Thread.run(Thread.java:1583)",
+    };
+    var suspects = BlockInvestigator.CorrelateGameLog(fabricLog, new TimeSpan(20, 52, 57), "discord.com", mods);
+    Assert(suspects.Count > 0 && suspects[0].ModId == "craftpresence" && suspects[0].Score == 30 && suspects[0].Lines.Length == 3,
+        $"CraftPresence deveria liderar com 3 linhas: {string.Join(" | ", suspects.Select(s => $"{s.Source}/{s.ModId}/{s.Score}"))}");
+    Assert(suspects.Any(s => s.ModId == "unilib" && s.Score == 1), "UniLib (só HTTP) deveria aparecer com pontuação baixa");
+    Assert(!suspects.Any(s => s.Source.Contains("Render") || s.Source == "EvilThread"), "thread genérica / linha fora da janela entrou como suspeito");
 
-    Console.WriteLine("PASS — BlockInvestigator: webhook exato (claro/base64 decodificado/-EncodedCommand), origem jar-in-jar, metadados do mod, sem falso positivo, alvos sem vazar token, javaw travado.");
+    var forgeLog = new[] { "[04Oct2026 20:52:57.123] [pool-3-thread-1/INFO] [com.gitlab.cdagaming.craftpresence.CraftPresence/]: Checking Discord for available assets" };
+    var forgeSuspects = BlockInvestigator.CorrelateGameLog(forgeLog, new TimeSpan(20, 52, 58), "discord.com", mods);
+    Assert(forgeSuspects.Count == 1 && forgeSuspects[0].ModId == "craftpresence", "formato Forge (logger com pacote) não identificou o mod");
+
+    // Impressão digital: muda quando um mod entra no conjunto; regra presa a ela.
+    var dir = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), $"ag-selftest-mods-{Guid.NewGuid():N}")).FullName;
+    try
+    {
+        File.WriteAllText(Path.Combine(dir, "a.jar"), "a");
+        var files = Directory.GetFiles(dir).ToList();
+        var fp1 = BlockInvestigator.ComputeFingerprint(files, Array.Empty<(string, string)>());
+        Assert(fp1 == BlockInvestigator.ComputeFingerprint(files, Array.Empty<(string, string)>()), "impressão digital não é determinística");
+        File.WriteAllText(Path.Combine(dir, "evil.jar"), "x");
+        var fp2 = BlockInvestigator.ComputeFingerprint(Directory.GetFiles(dir), Array.Empty<(string, string)>());
+        Assert(fp1 is not null && fp2 is not null && fp1 != fp2, "mod novo não mudou a impressão digital");
+        var aJar = Path.Combine(dir, "a.jar");
+        var originalTime = File.GetLastWriteTimeUtc(aJar);
+        File.WriteAllText(aJar, "b"); // mesmo tamanho
+        File.SetLastWriteTimeUtc(aJar, originalTime); // data forjada
+        Assert(BlockInvestigator.ComputeFingerprint(Directory.GetFiles(dir), Array.Empty<(string, string)>()) != fp2,
+            "jar trocado com mesmo tamanho/data não mudou a impressão digital");
+
+        var store = new DomainWhitelistStore(Path.Combine(dir, "rules.json"));
+        Assert(!store.AllowAlways("discord.com", "javaw.exe"), "javaw.exe não deveria poder ser liberado só pelo nome");
+        Assert(store.AllowAlways("discord.com", "javaw.exe", "user", fp1, @"C:\g"), "liberação com impressão digital foi recusada");
+        Assert(store.HasFingerprintRule("cdn.discord.com", "javaw.exe"), "HasFingerprintRule não achou a regra");
+        Assert(store.IsAllowed("discord.com", "javaw.exe", fp1), "conjunto aprovado deveria passar");
+        Assert(!store.IsAllowed("discord.com", "javaw.exe", fp2), "conjunto alterado (mod novo) deveria bloquear");
+        Assert(!store.IsAllowed("discord.com", "javaw.exe"), "sem impressão digital deveria bloquear");
+        Assert(!store.IsAllowed("steamcommunity.com", "javaw.exe", fp1), "liberação vazou pra outro domínio");
+        Assert(!store.AllowAlways("discord.com", "Discord.exe", "user", fp1), "impressão digital em processo comum deveria ser recusada");
+        store.RemoveRule("discord.com", "javaw.exe", fp1);
+        Assert(!store.IsAllowed("discord.com", "javaw.exe", fp1), "regra removida continuou valendo");
+    }
+    finally
+    {
+        Directory.Delete(dir, recursive: true);
+    }
+
+    Console.WriteLine("PASS — BlockInvestigator: webhook exato (claro/base64/-EncodedCommand), origem jar-in-jar, metadados do mod, sem falso positivo, alvos sem vazar token, mod achado pelo log (Fabric/Forge), impressão digital e liberação por conjunto de mods.");
     return 0;
 }
 

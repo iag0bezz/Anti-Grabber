@@ -138,6 +138,8 @@ public sealed class AllowAlwaysPayload
 {
     [JsonPropertyName("domain")] public string Domain { get; set; } = "";
     [JsonPropertyName("processName")] public string ProcessName { get; set; } = "";
+    [JsonPropertyName("fingerprint")] public string? Fingerprint { get; set; }
+    [JsonPropertyName("context")] public string? Context { get; set; }
 }
 
 public sealed class RuleEntryPayload
@@ -146,6 +148,8 @@ public sealed class RuleEntryPayload
     [JsonPropertyName("processName")] public string ProcessName { get; set; } = "";
     [JsonPropertyName("enabled")] public bool Enabled { get; set; }
     [JsonPropertyName("createdAt")] public DateTimeOffset CreatedAt { get; set; }
+    [JsonPropertyName("fingerprint")] public string? Fingerprint { get; set; }
+    [JsonPropertyName("context")] public string? Context { get; set; }
 }
 
 public sealed class RulesSnapshotPayload
@@ -158,6 +162,7 @@ public sealed class SetRuleEnabledPayload
     [JsonPropertyName("domain")] public string Domain { get; set; } = "";
     [JsonPropertyName("processName")] public string ProcessName { get; set; } = "";
     [JsonPropertyName("enabled")] public bool Enabled { get; set; }
+    [JsonPropertyName("fingerprint")] public string? Fingerprint { get; set; }
 }
 
 public sealed class RulesStatusPayload
