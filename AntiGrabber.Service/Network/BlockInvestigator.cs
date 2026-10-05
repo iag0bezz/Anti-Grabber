@@ -48,8 +48,12 @@ public sealed class BlockInvestigator
     private readonly ILogger<BlockInvestigator> _logger;
     private readonly IpcServer _ipcServer;
     private readonly ConcurrentDictionary<int, (DateTime When, InvestigationPayload? Result)> _byPid = new();
-    private readonly ConcurrentDictionary<string, FileFindingPayload?> _fileCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, FileScan> _fileCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, string?> _hashCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<int, (DateTime When, Task<string?> Task)> _fingerprintByPid = new();
+
+    // Log do jogo: espera o mod terminar de logar o erro/retentativa depois do bloqueio.
+    private static readonly TimeSpan GameLogSettle = TimeSpan.FromSeconds(20);
 
     public BlockInvestigator(ILogger<BlockInvestigator> logger, IpcServer ipcServer)
     {
@@ -62,17 +66,50 @@ public sealed class BlockInvestigator
     public InvestigationPayload? TryGetCached(int pid)
         => _byPid.TryGetValue(pid, out var e) && DateTime.UtcNow - e.When < ReinspectAfter ? e.Result : null;
 
+    /// Impressão digital do conjunto de jars/scripts que o host de código roda, pra checar
+    /// liberação no caminho do pacote. O hash do conteúdo (centenas de MB num modpack) roda
+    /// em segundo plano: enquanto não termina, devolve null com pending=true e o chamador
+    /// bloqueia em silêncio — o mod tenta de novo e passa quando o hash conferir.
+    public string? TryGetHostFingerprint(int pid, string processName, out bool pending)
+    {
+        var task = FingerprintTask(pid, processName);
+        pending = !task.IsCompleted;
+        return task.IsCompletedSuccessfully ? task.Result : null;
+    }
+
+    private Task<string?> FingerprintTask(int pid, string processName, ResolvedTargets? resolved = null)
+    {
+        var now = DateTime.UtcNow;
+        if (_fingerprintByPid.TryGetValue(pid, out var cached) && now - cached.When < ReinspectAfter) return cached.Task;
+
+        var task = Task.Run(() =>
+        {
+            try
+            {
+                var targets = resolved ?? (ProcessInfo.TryRead(pid) is { CommandLine: not null } info ? ResolveTargets(info, processName) : null);
+                return targets is null ? null : ComputeFingerprint(targets.Files, targets.Targets.Inline);
+            }
+            catch
+            {
+                return null; // sem impressão digital = sem liberação; segue bloqueando
+            }
+        });
+        _fingerprintByPid[pid] = (now, task);
+        return task;
+    }
+
     public void InvestigateBlock(int pid, string processName, string domain)
     {
         var now = DateTime.UtcNow;
         if (_byPid.TryGetValue(pid, out var last) && now - last.When < ReinspectAfter) return;
         _byPid[pid] = (now, null);
+        var blockTime = DateTimeOffset.Now;
 
         _ = Task.Run(async () =>
         {
             try
             {
-                var result = Investigate(pid, processName, domain);
+                var result = await InvestigateAsync(pid, processName, domain, blockTime);
                 _byPid[pid] = (now, result);
                 LogInvestigation(result);
                 await _ipcServer.PublishAsync(new IpcEnvelope { Type = IpcMessageType.InvestigationEvent, Investigation = result });
@@ -84,7 +121,7 @@ public sealed class BlockInvestigator
         });
     }
 
-    private InvestigationPayload Investigate(int pid, string processName, string domain)
+    private async Task<InvestigationPayload> InvestigateAsync(int pid, string processName, string domain, DateTimeOffset blockTime)
     {
         var result = new InvestigationPayload
         {
@@ -132,26 +169,182 @@ public sealed class BlockInvestigator
             return result;
         }
 
-        var targets = ExtractScanTargets(processName, SplitArgs(info.CommandLine));
+        var resolved = ResolveTargets(info, processName);
+        var targets = resolved.Targets;
         result.ScanTargets = targets.Paths.Concat(targets.Inline.Select(i => i.Source)).ToArray();
+        result.Context = resolved.Context;
+        result.Fingerprint = await FingerprintTask(pid, processName, resolved);
 
         var findings = new List<FileFindingPayload>();
-        var scanned = 0;
-        foreach (var file in EnumerateFiles(targets.Paths))
+        var mods = new List<(string File, ModMetadata? Mod)>();
+        foreach (var file in resolved.Files)
         {
-            scanned++;
-            if (ScanFileCached(file) is { } finding) findings.Add(finding);
+            var scan = ScanFileCached(file);
+            if (scan.Finding is not null) findings.Add(scan.Finding);
+            mods.Add((file, scan.Mod));
         }
         foreach (var (source, text) in targets.Inline)
         {
-            scanned++;
             var hits = FindHits(text, source);
             if (hits.Count > 0) findings.Add(new FileFindingPayload { Path = source, Indicators = hits.ToArray() });
         }
 
-        result.FilesScanned = scanned;
+        result.FilesScanned = resolved.Files.Count + targets.Inline.Count;
         result.Findings = findings.ToArray();
+
+        // Qual mod falou com o domínio: o log do jogo traz o nome do mod em cada linha
+        // ([CraftPresence/INFO]), coisa que a rede nunca mostra.
+        if (resolved.GameDir is { } gameDir)
+        {
+            var logPath = Path.Combine(gameDir, "logs", "latest.log");
+            if (File.Exists(logPath))
+            {
+                var wait = blockTime + GameLogSettle - DateTimeOffset.Now;
+                if (wait > TimeSpan.Zero) await Task.Delay(wait);
+                result.GameLogPath = logPath;
+                result.LogSuspects = CorrelateGameLog(ReadLogTail(logPath), blockTime.TimeOfDay, domain, mods).ToArray();
+            }
+        }
         return result;
+    }
+
+    private sealed record ResolvedTargets(ScanTargets Targets, List<string> Files, string? GameDir, string? Context);
+
+    private static ResolvedTargets ResolveTargets(ProcessInfo info, string processName)
+    {
+        var targets = ExtractScanTargets(processName, SplitArgs(info.CommandLine!));
+
+        // Launcher que não passa --gameDir (ou passa por stdin): o jogo roda com o
+        // diretório de trabalho na pasta da instância — usa ele se tiver cara de Minecraft.
+        if (targets.GameDirs.Count == 0 && info.CurrentDirectory is { } cwd
+            && Path.GetFileNameWithoutExtension(processName).StartsWith("java", StringComparison.OrdinalIgnoreCase)
+            && (Directory.Exists(Path.Combine(cwd, "mods")) || File.Exists(Path.Combine(cwd, "logs", "latest.log"))))
+        {
+            targets.GameDirs.Add(cwd);
+            targets.Paths.Add(Path.Combine(cwd, "mods"));
+        }
+
+        var files = EnumerateFiles(targets.Paths).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var gameDir = targets.GameDirs.FirstOrDefault(Directory.Exists);
+        var context = gameDir ?? files.FirstOrDefault() ?? targets.Inline.Select(i => i.Source).FirstOrDefault();
+        return new ResolvedTargets(targets, files, gameDir, context);
+    }
+
+    /// Hash do conjunto exato: caminho + SHA-256 do CONTEÚDO de cada jar/script (tamanho/data
+    /// dá pra forjar), mais o código inline. Mod novo/alterado/removido muda a impressão e
+    /// derruba a liberação. Arquivo ilegível → sem impressão → sem liberação.
+    public static string? ComputeFingerprint(IEnumerable<string> files, IEnumerable<(string Source, string Text)> inline)
+    {
+        var entries = new List<string>();
+        foreach (var file in files)
+        {
+            if (Sha256(file) is not { } hash) return null;
+            entries.Add($"{Path.GetFullPath(file).ToLowerInvariant()}|{hash}");
+        }
+        entries.AddRange(inline.Select(i => $"inline|{i.Source}|{i.Text}"));
+        entries.Sort(StringComparer.Ordinal);
+        if (entries.Count == 0) return null;
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\n", entries)))).ToLowerInvariant();
+    }
+
+    private static IEnumerable<string> ReadLogTail(string path, int maxBytes = 4 * 1024 * 1024)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        if (stream.Length > maxBytes) stream.Seek(-maxBytes, SeekOrigin.End);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        var lines = new List<string>();
+        while (reader.ReadLine() is { } line) lines.Add(line);
+        return lines;
+    }
+
+    // [20:52:57] [CraftPresence/INFO]: msg                              (vanilla/Fabric/Quilt)
+    // [20:52:57] [Render thread/INFO] (craftpresence) msg               (Fabric com logger)
+    // [04Oct2026 20:52:57.123] [CraftPresence/INFO] [com.x.Mod/]: msg   (Forge/NeoForge)
+    private static readonly Regex LogLine = new(
+        @"^\[(?:[^\]]*?[ T])?(?<h>\d{2}):(?<m>\d{2}):(?<s>\d{2})(?:[.,]\d+)?\]\s*\[(?<thread>[^\]]+)/(?<level>[A-Z]+)\](?:\s*\[(?<logger>[^\]]*)\])?(?:\s*\((?<logger2>[^)]*)\))?:?\s?(?<msg>.*)$");
+
+    private static readonly Regex GenericSource = new(
+        @"^(main|Render thread|Server thread|Client thread|Worker-.*|IO-Worker-\d+|Download-\d+|pool-\d+-thread-\d+|ForkJoinPool.*|HttpClient.*|Thread-\d+|Netty .*|Timer-\d+|modloading-worker.*|Sound engine.*|Realms.*|minecraft|net\.minecraft.*|com\.mojang.*)$",
+        RegexOptions.IgnoreCase);
+
+    private static readonly TimeSpan WindowBefore = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan WindowAfter = TimeSpan.FromSeconds(25);
+
+    /// Quem escreveu no log, perto do bloqueio, citando o domínio (forte) ou HTTP/API (fraco).
+    /// A thread/logger da linha vira o suspeito, e é casada com id/nome dos mods instalados.
+    // ponytail: mod que loga pela thread genérica (Render thread) sem citar o domínio não é identificado.
+    public static List<LogSuspectPayload> CorrelateGameLog(
+        IEnumerable<string> lines, TimeSpan blockTimeOfDay, string domain, IReadOnlyList<(string File, ModMetadata? Mod)> mods)
+    {
+        var labels = domain.Split('.', StringSplitOptions.RemoveEmptyEntries);
+        var core = labels.Length >= 2 ? labels[^2] : domain;
+        var bySource = new Dictionary<string, LogSuspectPayload>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var line in lines)
+        {
+            var m = LogLine.Match(line);
+            if (!m.Success) continue;
+
+            var time = new TimeSpan(int.Parse(m.Groups["h"].Value), int.Parse(m.Groups["m"].Value), int.Parse(m.Groups["s"].Value));
+            var delta = time - new TimeSpan(blockTimeOfDay.Hours, blockTimeOfDay.Minutes, blockTimeOfDay.Seconds);
+            if (delta > TimeSpan.FromHours(12)) delta -= TimeSpan.FromDays(1);
+            if (delta < TimeSpan.FromHours(-12)) delta += TimeSpan.FromDays(1);
+            if (delta < -WindowBefore || delta > WindowAfter) continue;
+
+            var msg = m.Groups["msg"].Value;
+            var score = msg.Contains(core, StringComparison.OrdinalIgnoreCase) ? 10
+                : Regex.IsMatch(msg, @"https?://|webhook|connect", RegexOptions.IgnoreCase) ? 1
+                : 0;
+            if (score == 0) continue;
+
+            var source = PickSource(m);
+            if (source is null) continue;
+
+            if (!bySource.TryGetValue(source, out var suspect))
+            {
+                var (file, mod) = MatchMod(source, mods);
+                suspect = new LogSuspectPayload { Source = source, ModId = mod?.Id, ModName = mod?.Name, ModFile = file };
+                bySource[source] = suspect;
+            }
+            suspect.Score += score;
+            if (suspect.Lines.Length < 5) suspect.Lines = [.. suspect.Lines, line.Length > 300 ? line[..300] : line];
+        }
+
+        return bySource.Values.OrderByDescending(s => s.Score).Take(5).ToList();
+    }
+
+    private static string? PickSource(Match m)
+    {
+        foreach (var group in new[] { "logger", "logger2", "thread" })
+        {
+            var value = m.Groups[group].Value.Trim().TrimEnd('/');
+            if (value.Length == 0) continue;
+            if (group != "thread" && value.Contains('.')) value = value.Split('.')[^1]; // com.x.CraftPresence → CraftPresence
+            if (value.Length == 0 || GenericSource.IsMatch(value) || GenericSource.IsMatch(m.Groups[group].Value.Trim())) continue;
+            return value;
+        }
+        return null;
+    }
+
+    private static (string? File, ModMetadata? Mod) MatchMod(string source, IReadOnlyList<(string File, ModMetadata? Mod)> mods)
+    {
+        static string Norm(string? s) => s is null ? "" : new string(s.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+        var src = Norm(source);
+        if (src.Length == 0) return (null, null);
+
+        foreach (var (file, mod) in mods)
+            if (src == Norm(mod?.Id) || src == Norm(mod?.Name)) return (file, mod);
+        if (src.Length < 5) return (null, null);
+        foreach (var (file, mod) in mods)
+        {
+            var id = Norm(mod?.Id);
+            var name = Norm(mod?.Name);
+            if ((id.Length >= 5 && (id.Contains(src) || src.Contains(id))) || (name.Length >= 5 && (name.Contains(src) || src.Contains(name))))
+                return (file, mod);
+        }
+        foreach (var (file, mod) in mods)
+            if (Norm(Path.GetFileNameWithoutExtension(file)).StartsWith(src)) return (file, mod);
+        return (null, null);
     }
 
     private void LogInvestigation(InvestigationPayload r)
@@ -175,11 +368,27 @@ public sealed class BlockInvestigator
             "Investigação {Process} (pid={Pid}): {Count} arquivo(s) analisados em {Targets}.",
             r.ProcessName, r.Pid, r.FilesScanned, r.ScanTargets.Length == 0 ? "(nenhum alvo reconhecido)" : string.Join("; ", r.ScanTargets));
 
+        if (r.GameLogPath is not null)
+        {
+            if (r.LogSuspects.Length == 0)
+                _logger.LogInformation(
+                    "Investigação {Process} (pid={Pid}) → {Domain}: nenhum mod citou o domínio/HTTP em {Log} na janela do bloqueio.",
+                    r.ProcessName, r.Pid, r.Domain, r.GameLogPath);
+            foreach (var s in r.LogSuspects)
+            {
+                _logger.LogWarning(
+                    "Mod provável pelo log do jogo: {Mod} (id={ModId}, arquivo={File}) | fonte no log=[{Source}] | pontuação={Score} | log={Log}",
+                    s.ModName ?? s.ModId ?? s.Source, s.ModId ?? "?", s.ModFile ?? "?", s.Source, s.Score, r.GameLogPath);
+                foreach (var line in s.Lines)
+                    _logger.LogWarning("    {Line}", line);
+            }
+        }
+
         if (r.Findings.Length == 0)
         {
             _logger.LogInformation(
-                "Investigação {Process} (pid={Pid}) → {Domain}: nenhum indicador de webhook/token encontrado.",
-                r.ProcessName, r.Pid, r.Domain);
+                "Investigação {Process} (pid={Pid}) → {Domain}: nenhum indicador de webhook/token encontrado. Impressão digital do conjunto: {Fingerprint} ({Context}).",
+                r.ProcessName, r.Pid, r.Domain, r.Fingerprint ?? "?", r.Context ?? "?");
             return;
         }
 
@@ -196,7 +405,7 @@ public sealed class BlockInvestigator
         }
     }
 
-    public sealed record ScanTargets(List<string> Paths, List<(string Source, string Text)> Inline);
+    public sealed record ScanTargets(List<string> Paths, List<(string Source, string Text)> Inline, List<string> GameDirs);
 
     /// O que o host de código está executando. Java: -jar e pastas de mods (--gameDir do
     /// launcher oficial/Modrinth/CurseForge, ou instância Prism/MultiMC via
@@ -207,6 +416,7 @@ public sealed class BlockInvestigator
     {
         var paths = new List<string>();
         var inline = new List<(string, string)>();
+        var gameDirs = new List<string>();
         var host = Path.GetFileNameWithoutExtension(processName).ToLowerInvariant();
 
         string? Next(int i) => i + 1 < args.Count ? args[i + 1] : null;
@@ -223,14 +433,21 @@ public sealed class BlockInvestigator
                 {
                     var arg = args[i];
                     if (arg == "-jar" && Next(i) is { } jar) paths.Add(jar);
-                    else if (arg == "--gameDir" && Next(i) is { } dir) paths.Add(Path.Combine(dir, "mods"));
+                    else if (arg == "--gameDir" && Next(i) is { } dir)
+                    {
+                        gameDirs.Add(dir);
+                        paths.Add(Path.Combine(dir, "mods"));
+                    }
                     else if (arg.StartsWith("-Djava.library.path=", StringComparison.Ordinal))
                     {
                         var natives = arg["-Djava.library.path=".Length..].Trim('"').TrimEnd('\\', '/');
                         if (!Path.GetFileName(natives).Equals("natives", StringComparison.OrdinalIgnoreCase)) continue;
                         if (Path.GetDirectoryName(natives) is not { } instance) continue;
-                        paths.Add(Path.Combine(instance, "minecraft", "mods"));
-                        paths.Add(Path.Combine(instance, ".minecraft", "mods"));
+                        foreach (var sub in new[] { "minecraft", ".minecraft" })
+                        {
+                            gameDirs.Add(Path.Combine(instance, sub));
+                            paths.Add(Path.Combine(instance, sub, "mods"));
+                        }
                     }
                 }
                 break;
@@ -284,7 +501,7 @@ public sealed class BlockInvestigator
                 break;
         }
 
-        return new ScanTargets(paths, inline);
+        return new ScanTargets(paths, inline, gameDirs);
     }
 
     private static IEnumerable<string> EnumerateFiles(IEnumerable<string> targets)
@@ -302,7 +519,9 @@ public sealed class BlockInvestigator
         }
     }
 
-    private FileFindingPayload? ScanFileCached(string path)
+    public sealed record FileScan(FileFindingPayload? Finding, ModMetadata? Mod);
+
+    private FileScan ScanFileCached(string path)
     {
         var info = new FileInfo(path);
         var key = $"{path}|{info.Length}|{info.LastWriteTimeUtc.Ticks}";
@@ -314,12 +533,12 @@ public sealed class BlockInvestigator
             }
             catch
             {
-                return null; // arquivo corrompido/travado — não é prova de nada
+                return new FileScan(null, null); // arquivo corrompido/travado — não é prova de nada
             }
         });
     }
 
-    public static FileFindingPayload? ScanFile(string path)
+    public static FileScan ScanFile(string path)
     {
         var info = new FileInfo(path);
         List<IndicatorHitPayload> hits;
@@ -332,12 +551,12 @@ public sealed class BlockInvestigator
         }
         else
         {
-            if (info.Length > MaxEntryBytes) return null;
+            if (info.Length > MaxEntryBytes) return new FileScan(null, null);
             hits = FindHits(File.ReadAllText(path), Path.GetFileName(path));
         }
 
-        if (hits.Count == 0) return null;
-        return new FileFindingPayload
+        if (hits.Count == 0) return new FileScan(null, mod);
+        return new FileScan(new FileFindingPayload
         {
             Path = path,
             Sha256 = Sha256(path),
@@ -347,7 +566,7 @@ public sealed class BlockInvestigator
             ModName = mod?.Name,
             ModVersion = mod?.Version,
             Indicators = hits.ToArray(),
-        };
+        }, mod);
     }
 
     public sealed record ModMetadata(string? Id, string? Name, string? Version);
@@ -549,7 +768,7 @@ public sealed class BlockInvestigator
         }
     }
 
-    private sealed record ProcessInfo(string? ImagePath, DateTimeOffset? StartTime, int? ParentPid, string? CommandLine)
+    private sealed record ProcessInfo(string? ImagePath, DateTimeOffset? StartTime, int? ParentPid, string? CommandLine, string? CurrentDirectory)
     {
         public static ProcessInfo? TryRead(int pid)
         {
@@ -557,12 +776,54 @@ public sealed class BlockInvestigator
             if (handle == IntPtr.Zero) return null;
             try
             {
-                return new ProcessInfo(ReadImagePath(handle), ReadStartTime(handle), ReadParentPid(handle), ReadCommandLine(handle));
+                return new ProcessInfo(ReadImagePath(handle), ReadStartTime(handle), ReadParentPid(handle), ReadCommandLine(handle), ReadCurrentDirectory(pid));
             }
             finally
             {
                 CloseHandle(handle);
             }
+        }
+
+        /// PEB → RTL_USER_PROCESS_PARAMETERS.CurrentDirectory. Precisa de PROCESS_VM_READ
+        /// (o serviço roda como LocalSystem).
+        // ponytail: só processo 64-bit (offsets x64); Java 32-bit fica sem esse fallback.
+        private static string? ReadCurrentDirectory(int pid)
+        {
+            var handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, false, pid);
+            if (handle == IntPtr.Zero) return null;
+            var buffer = Marshal.AllocHGlobal(IntPtr.Size * 6);
+            try
+            {
+                if (IntPtr.Size != 8 || !IsWow64Process(handle, out var wow64) || wow64) return null;
+                if (NtQueryInformationProcess(handle, ProcessBasicInformation, buffer, IntPtr.Size * 6, out _) != 0) return null;
+                var peb = Marshal.ReadIntPtr(buffer, IntPtr.Size); // PebBaseAddress
+
+                var parameters = ReadPointer(handle, peb + 0x20); // PEB.ProcessParameters
+                if (parameters == IntPtr.Zero) return null;
+                var lengthBytes = new byte[2];
+                if (!ReadProcessMemory(handle, parameters + 0x38, lengthBytes, 2, out _)) return null; // CurrentDirectory.DosPath.Length
+                var text = ReadPointer(handle, parameters + 0x40); // CurrentDirectory.DosPath.Buffer
+                var length = BitConverter.ToUInt16(lengthBytes);
+                if (text == IntPtr.Zero || length == 0) return null;
+                var chars = new byte[length];
+                if (!ReadProcessMemory(handle, text, chars, length, out _)) return null;
+                return Encoding.Unicode.GetString(chars).TrimEnd('\\');
+            }
+            catch
+            {
+                return null;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+                CloseHandle(handle);
+            }
+        }
+
+        private static IntPtr ReadPointer(IntPtr handle, IntPtr address)
+        {
+            var bytes = new byte[IntPtr.Size];
+            return ReadProcessMemory(handle, address, bytes, bytes.Length, out _) ? (IntPtr)BitConverter.ToInt64(bytes) : IntPtr.Zero;
         }
 
         private static string? ReadImagePath(IntPtr handle)
@@ -611,6 +872,13 @@ public sealed class BlockInvestigator
     }
 
     private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+    private const uint PROCESS_VM_READ = 0x0010;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool ReadProcessMemory(IntPtr process, IntPtr address, byte[] buffer, int size, out IntPtr read);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool IsWow64Process(IntPtr process, out bool wow64);
     private const int ProcessBasicInformation = 0;
     private const int ProcessCommandLineInformation = 60;
 

@@ -90,6 +90,25 @@ public sealed class InvestigationPayload
     [JsonPropertyName("filesScanned")] public int FilesScanned { get; set; }
     [JsonPropertyName("findings")] public FileFindingPayload[] Findings { get; set; } = Array.Empty<FileFindingPayload>();
     [JsonPropertyName("note")] public string? Note { get; set; }
+    /// Pasta do jogo (Minecraft) ou script/código identificado — rótulo da liberação.
+    [JsonPropertyName("context")] public string? Context { get; set; }
+    /// Impressão digital do conjunto de jars/scripts; base pra liberar host de código.
+    [JsonPropertyName("fingerprint")] public string? Fingerprint { get; set; }
+    [JsonPropertyName("gameLogPath")] public string? GameLogPath { get; set; }
+    /// Mods que escreveram no log do jogo sobre o domínio/HTTP na janela do bloqueio.
+    [JsonPropertyName("logSuspects")] public LogSuspectPayload[] LogSuspects { get; set; } = Array.Empty<LogSuspectPayload>();
+}
+
+public sealed class LogSuspectPayload
+{
+    /// Thread ou logger como aparece no log (ex: "CraftPresence").
+    [JsonPropertyName("source")] public string Source { get; set; } = "";
+    [JsonPropertyName("modId")] public string? ModId { get; set; }
+    [JsonPropertyName("modName")] public string? ModName { get; set; }
+    [JsonPropertyName("modFile")] public string? ModFile { get; set; }
+    [JsonPropertyName("score")] public int Score { get; set; }
+    /// Linhas exatas do log que levaram à suspeita.
+    [JsonPropertyName("lines")] public string[] Lines { get; set; } = Array.Empty<string>();
 }
 
 public sealed class FileFindingPayload
