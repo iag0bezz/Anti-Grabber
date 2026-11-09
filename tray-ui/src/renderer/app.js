@@ -133,6 +133,8 @@ function app() {
 
     blockMessage(ev) {
       if (!ev) return '';
+      // Mod suspeito achado na pasta: não houve conexão; o serviço manda a mensagem pronta.
+      if (ev.protocol === 'MOD' && ev.plainLanguageMessage) return ev.plainLanguageMessage;
       return this.t(ev.correlatedFileAccess ? 'blockMsg.correlated' : 'blockMsg.suspicious', {
         process: ev.processName,
         domain: ev.domain,

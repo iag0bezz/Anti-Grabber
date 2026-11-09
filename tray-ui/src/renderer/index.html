@@ -106,7 +106,7 @@
                 <span x-text="t('feed.fileChip')"></span>
               </span>
               <span class="feed-time" x-text="formatRowTime(ev.timestamp)"></span>
-              <button x-show="!isCodeHost(ev.processName)" class="allow-btn" :class="{ done: isAllowed(ev.domain, ev.processName) }" :disabled="isAllowed(ev.domain, ev.processName)" @click.stop="allow(ev)">
+              <button x-show="!isCodeHost(ev.processName) && ev.protocol !== 'MOD'" class="allow-btn" :class="{ done: isAllowed(ev.domain, ev.processName) }" :disabled="isAllowed(ev.domain, ev.processName)" @click.stop="allow(ev)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
                 <span x-text="isAllowed(ev.domain, ev.processName) ? t('feed.allowed') : t('feed.allow')"></span>
               </button>
@@ -359,8 +359,8 @@
           <div class="detail-row"><dt x-text="t('detail.process')"></dt><dd x-text="detailEvent.processName"></dd></div>
           <div class="detail-row" x-show="detailEvent.pid"><dt x-text="t('detail.pid')"></dt><dd x-text="detailEvent.pid"></dd></div>
           <div class="detail-row" x-show="detailEvent.localPort"><dt x-text="t('detail.localPort')"></dt><dd x-text="detailEvent.localPort"></dd></div>
-          <div class="detail-row"><dt x-text="t('detail.domain')"></dt><dd x-text="detailEvent.domain"></dd></div>
-          <div class="detail-row"><dt x-text="t('detail.protocol')"></dt><dd x-text="detailEvent.protocol === 'QUIC' ? t('detail.protocolQuic') : t('detail.protocolValue')"></dd></div>
+          <div class="detail-row" x-show="detailEvent.protocol !== 'MOD'"><dt x-text="t('detail.domain')"></dt><dd x-text="detailEvent.domain"></dd></div>
+          <div class="detail-row" x-show="detailEvent.protocol !== 'MOD'"><dt x-text="t('detail.protocol')"></dt><dd x-text="detailEvent.protocol === 'QUIC' ? t('detail.protocolQuic') : t('detail.protocolValue')"></dd></div>
           <div class="detail-row"><dt x-text="t('detail.timestamp')"></dt><dd x-text="formatFullTime(detailEvent.timestamp)"></dd></div>
           <div class="detail-row"><dt x-text="t('detail.correlated')"></dt><dd x-text="detailEvent.correlatedFileAccess ? t('detail.correlatedYes') : t('detail.correlatedNo')"></dd></div>
           <div class="detail-row" x-show="detailEvent.correlatedFilePath"><dt x-text="t('detail.filePath')"></dt><dd class="mono" x-text="detailEvent.correlatedFilePath"></dd></div>
@@ -425,7 +425,7 @@
           </div>
         </template>
         <p class="detail-note" x-show="isCodeHost(detailEvent.processName) && !canAllowHost(detailEvent)" x-text="t('inv.codeHostNoAllow')"></p>
-        <button x-show="!isCodeHost(detailEvent.processName)" class="allow-btn detail-allow" :class="{ done: isAllowed(detailEvent.domain, detailEvent.processName) }" :disabled="isAllowed(detailEvent.domain, detailEvent.processName)" @click="allow(detailEvent)">
+        <button x-show="!isCodeHost(detailEvent.processName) && detailEvent.protocol !== 'MOD'" class="allow-btn detail-allow" :class="{ done: isAllowed(detailEvent.domain, detailEvent.processName) }" :disabled="isAllowed(detailEvent.domain, detailEvent.processName)" @click="allow(detailEvent)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
           <span x-text="isAllowed(detailEvent.domain, detailEvent.processName) ? t('detail.allowed') : t('detail.allow')"></span>
         </button>

@@ -289,7 +289,11 @@ public sealed class TrayForm : Form
 
         var lang = settings.Language;
         var vars = new Dictionary<string, string> { ["process"] = ev.ProcessName, ["domain"] = ev.Domain };
-        var message = HostStrings.T(lang, ev.CorrelatedFileAccess ? "blockMsg.correlated" : "blockMsg.suspicious", vars);
+        // Mod suspeito achado na pasta (sem conexão/domínio): a mensagem pronta do serviço
+        // diz qual mod e onde está; o template "processo → domínio" não se aplica.
+        var message = ev.Protocol == "MOD" && ev.PlainLanguageMessage.Length > 0
+            ? ev.PlainLanguageMessage
+            : HostStrings.T(lang, ev.CorrelatedFileAccess ? "blockMsg.correlated" : "blockMsg.suspicious", vars);
 
         var builder = new ToastContentBuilder()
             .AddText(HostStrings.T(lang, "notif.title"))
