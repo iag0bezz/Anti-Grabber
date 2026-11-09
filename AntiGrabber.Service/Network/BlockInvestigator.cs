@@ -43,7 +43,44 @@ public sealed class BlockInvestigator
         new("credenciais de navegador", new(@"Login Data|encrypted_key"), Expand.Context),
         new("bot do Telegram", new(@"api\.telegram\.org/bot[\w:\-/?=&%.]*", RegexOptions.IgnoreCase), Expand.UrlLeft),
         new("indicador do Fractureiser", new(@"files-8ie\.pages\.dev|85\.217\.144\.130|dev/neko/nek"), Expand.Context),
+        new("arquivo de conta de launcher do Minecraft", new(
+            @"launcher_accounts(?:_microsoft_store)?\.json|launcher_msa_credentials|TlauncherProfiles\.json|" +
+            @"\.lunarclient[\\/]+settings[\\/]+game[\\/]+accounts\.json|(?:PrismLauncher|PolyMC|\.feather)[\\/]+accounts\.json",
+            RegexOptions.IgnoreCase), Expand.Context),
+        // Só em forma de URL: o domínio solto aparece em lista de sufixos públicos (httpclient
+        // embute a public-suffix-list da Mozilla, que cita ngrok.io/trycloudflare.com).
+        new(ChannelLabel, new(@"https?://(?:\d{1,3}(?:\.\d{1,3}){3}|(?:[\w-]+\.)*(?:" +
+            string.Join("|", SensitiveAppCatalog.ExfiltrationDomains.Select(Regex.Escape)) + @"))\b[\w:/\-.?=&%]*", RegexOptions.IgnoreCase)),
     ];
+
+    // Sinais fracos: mod legítimo pega o token (gerenciador de contas, Essential) ou cita
+    // paste/IP (upload de crash report). Só viram achado juntos ou ao lado de um forte.
+    private const string SessionLabel = "acesso ao token de sessão do Minecraft";
+    private const string ChannelLabel = "canal de exfiltração";
+
+    // Method ref leva a classe junto no constant pool do MESMO .class: classe + método
+    // presentes na entrada = código que lê o token. O nome muda com o mapeamento em runtime.
+    // ponytail: nomes de intermediary/SRG/MCP vêm das tabelas públicas de mapeamento, não de
+    // amostra real; mapeamento novo do Minecraft = linha nova aqui.
+    private static readonly (string Mapping, string Class, string Method)[] SessionAccess =
+    [
+        ("Mojang (NeoForge 1.20.5+, Minecraft 26.1+)", "net/minecraft/client/User", "getAccessToken"),
+        ("SRG (Forge 1.17–1.20.4)", "net/minecraft/client/User", "m_92547_"),
+        ("intermediary (Fabric/Quilt)", "net/minecraft/class_320", "method_1674"),
+        ("Yarn", "net/minecraft/client/session/Session", "getAccessToken"),
+        ("Yarn", "net/minecraft/client/util/Session", "getAccessToken"),
+        ("MCP (Forge 1.8–1.12)", "net/minecraft/util/Session", "func_148254_d"),
+        ("MCP (Forge 1.8–1.12)", "net/minecraft/util/Session", "func_111286_b"),
+    ];
+
+    /// Aplica a regra dos sinais fracos no arquivo inteiro (a leitura do token e o envio
+    /// costumam estar em classes diferentes do mesmo jar).
+    public static List<IndicatorHitPayload> ApplyWeakSignalRule(List<IndicatorHitPayload> hits)
+    {
+        var strong = hits.Any(h => h.Label is not (SessionLabel or ChannelLabel));
+        var paired = hits.Any(h => h.Label == SessionLabel) && hits.Any(h => h.Label == ChannelLabel);
+        return strong || paired ? hits : new List<IndicatorHitPayload>();
+    }
 
     private readonly ILogger<BlockInvestigator> _logger;
     private readonly IpcServer _ipcServer;
@@ -185,7 +222,7 @@ public sealed class BlockInvestigator
         }
         foreach (var (source, text) in targets.Inline)
         {
-            var hits = FindHits(text, source);
+            var hits = ApplyWeakSignalRule(FindHits(text, source));
             if (hits.Count > 0) findings.Add(new FileFindingPayload { Path = source, Indicators = hits.ToArray() });
         }
 
@@ -552,7 +589,7 @@ public sealed class BlockInvestigator
         else
         {
             if (info.Length > MaxEntryBytes) return new FileScan(null, null);
-            hits = FindHits(File.ReadAllText(path), Path.GetFileName(path));
+            hits = ApplyWeakSignalRule(FindHits(File.ReadAllText(path), Path.GetFileName(path)));
         }
 
         if (hits.Count == 0) return new FileScan(null, mod);
@@ -601,10 +638,9 @@ public sealed class BlockInvestigator
             if (depth == 0) mod = MergeMod(mod, entry.FullName, buffer);
         }
 
-        return (hits
-            .DistinctBy(h => (h.Label, h.Entry, h.Match))
-            .Take(MaxHitsPerFile)
-            .ToList(), mod);
+        var distinct = hits.DistinctBy(h => (h.Label, h.Entry, h.Match)).Take(MaxHitsPerFile).ToList();
+        // jar-in-jar devolve tudo pro de cima: a regra vale pro arquivo que o usuário instalou.
+        return (depth == 0 ? ApplyWeakSignalRule(distinct) : distinct, mod);
     }
 
     public static List<IndicatorHitPayload> FindHits(string text, string entry)
@@ -624,6 +660,13 @@ public sealed class BlockInvestigator
                 });
                 if (hits.Count >= MaxHitsPerFile) return hits;
             }
+        }
+
+        foreach (var (mapping, cls, method) in SessionAccess)
+        {
+            if (!text.Contains(cls, StringComparison.Ordinal) || !text.Contains(method, StringComparison.Ordinal)) continue;
+            hits.Add(new IndicatorHitPayload { Label = SessionLabel, Entry = entry, Match = $"{cls}.{method} ({mapping})" });
+            break;
         }
         return hits;
     }
