@@ -32,6 +32,7 @@ var selfTests = new Dictionary<string, Func<Task<int>>>(StringComparer.OrdinalIg
     ["minecraft-catalog-selftest"] = () => Task.FromResult(RunMinecraftCatalogSelfTest()),
     ["exfil-domains-selftest"] = () => Task.FromResult(RunExfilDomainsSelfTest()),
     ["account-read-selftest"] = () => Task.FromResult(RunAccountReadSelfTest()),
+    ["session-scan-selftest"] = () => Task.FromResult(RunSessionScanSelfTest()),
 };
 const string AllSelfTestsScenario = "selftest-all";
 
@@ -829,6 +830,64 @@ static int RunAccountReadSelfTest()
     Assert(!tracker.AnyRecentAccountRead && tracker.TryGetRecentAccountRead(42) is null, "leitura de conta não expirou em 60s");
 
     Console.WriteLine("PASS — leitura de conta: dono (incl. javaw do TLauncher vs jogo), leitor confiável sem nome forjado, caminho ETW/curinga e janela de 60s.");
+    return 0;
+}
+
+// Roubo de sessão do Minecraft em mod: leitura do token + canal de envio no mesmo jar
+// viram achado; cada um sozinho (gerenciador de contas, upload de crash report) não.
+static int RunSessionScanSelfTest()
+{
+    const string cp = "\u0001\u0000 "; // cabeçalho de string do constant pool (tamanho imprimível)
+    string Labels(List<AntiGrabber.Shared.IndicatorHitPayload> h) => string.Join(" | ", h.Select(x => $"{x.Label}: {x.Match} @ {x.Entry}"));
+
+    // Fabric (intermediary): lê o token numa classe, manda pra IP cru em outra.
+    var fabricStealer = BuildJar(
+        ("fabric.mod.json", "{\"id\":\"fpsboost\",\"name\":\"FPS Boost\",\"version\":\"1.0\"}"),
+        ("a/Grab.class", cp + "net/minecraft/class_320" + cp + "method_1674" + cp + "Code"),
+        ("b/Send.class", cp + "http://45.12.33.9:8080/upload" + cp));
+    var (hits, _) = BlockInvestigator.ScanJar(new MemoryStream(fabricStealer));
+    Assert(hits.Any(h => h.Label == "acesso ao token de sessão do Minecraft" && h.Entry == "a/Grab.class" && h.Match.Contains("intermediary")),
+        $"leitura do token (intermediary) não achada: {Labels(hits)}");
+    Assert(hits.Any(h => h.Label == "canal de exfiltração" && h.Match == "http://45.12.33.9:8080/upload"), $"envio pra IP cru não achado: {Labels(hits)}");
+
+    // NeoForge (Mojang): token lido em jar-in-jar, envio pro bot do Telegram no jar de fora.
+    var inner = BuildJar(("x/U.class", cp + "net/minecraft/client/User" + cp + "getAccessToken"));
+    var (nested, _) = BlockInvestigator.ScanJar(new MemoryStream(BuildJar(
+        ("META-INF/jars/lib.jar", Encoding.Latin1.GetString(inner)),
+        ("c/T.class", cp + "https://pastebin.com/api/api_post.php" + cp))));
+    Assert(nested.Any(h => h.Label == "acesso ao token de sessão do Minecraft" && h.Entry == "META-INF/jars/lib.jar!/x/U.class"),
+        $"leitura do token em jar-in-jar não somou com o envio do jar de fora: {Labels(nested)}");
+
+    // Forge 1.8.9 (MCP) + webhook: indicador forte já existente, sessão entra como contexto.
+    var (mcp, _) = BlockInvestigator.ScanJar(new MemoryStream(BuildJar(
+        ("r/A.class", cp + "net/minecraft/util/Session" + cp + "func_111286_b" + cp + "https://discord.com/api/webhooks/1/x" + cp))));
+    Assert(mcp.Any(h => h.Label == "acesso ao token de sessão do Minecraft") && mcp.Any(h => h.Label == "URL de webhook do Discord"), $"MCP + webhook: {Labels(mcp)}");
+
+    // Mod que lê arquivo de conta de launcher: forte sozinho.
+    var (files, _) = BlockInvestigator.ScanJar(new MemoryStream(BuildJar(
+        ("s/F.class", cp + @"\.minecraft\launcher_accounts_microsoft_store.json" + cp),
+        ("s/G.class", cp + @".lunarclient/settings/game/accounts.json" + cp))));
+    Assert(files.Count(h => h.Label == "arquivo de conta de launcher do Minecraft") == 2, $"caminho de conta de launcher: {Labels(files)}");
+
+    // Falsos positivos: cada sinal fraco sozinho, e getAccessToken de OAuth qualquer.
+    var legit = new[]
+    {
+        BuildJar(("ias/Switch.class", cp + "net/minecraft/client/User" + cp + "getAccessToken" + cp + "https://api.minecraftservices.com/minecraft/profile")),
+        BuildJar(("crash/Up.class", cp + "https://pastebin.com/api/api_post.php" + cp + "http://127.0.0.1:25565/")),
+        BuildJar(("oauth/G.class", cp + "com/google/auth/Credentials" + cp + "getAccessToken" + cp + "https://transfer.sh/")),
+        // AuthMe real: lê o token (re-login) e embute httpclient com a public-suffix-list,
+        // que cita os domínios de túnel como texto solto, não URL.
+        BuildJar(
+            ("me/authme/A.class", cp + "net/minecraft/client/User" + cp + "getAccessToken"),
+            ("mozilla/public-suffix-list.txt", "// ngrok : https://ngrok.com/\nngrok.io\ntrycloudflare.com\npages.dev\n")),
+    };
+    foreach (var jar in legit)
+    {
+        var (fp, _) = BlockInvestigator.ScanJar(new MemoryStream(jar));
+        Assert(fp.Count == 0, $"mod legítimo virou achado: {Labels(fp)}");
+    }
+
+    Console.WriteLine("PASS — roubo de sessão em mod: token (intermediary/Mojang/MCP) + envio no mesmo jar, jar-in-jar, arquivo de conta de launcher, sem falso positivo de sinal fraco sozinho.");
     return 0;
 }
 
