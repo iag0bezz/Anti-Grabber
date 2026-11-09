@@ -259,7 +259,8 @@ public sealed class NetworkFilterWorker : BackgroundService
 
     private async Task<bool> DecideAsync(string sni, ushort localPort, AddressFamily family, bool isUdp, CancellationToken ct)
     {
-        if (!_whitelist.IsSensitiveDomain(sni)) return true;
+        var sensitive = _whitelist.IsSensitiveDomain(sni);
+        if (!sensitive && !_correlationTracker.AnyRecentAccountRead) return true;
 
         var pid = isUdp
             ? UdpProcessResolver.ResolvePidByLocalPort(localPort, family)
@@ -271,13 +272,19 @@ public sealed class NetworkFilterWorker : BackgroundService
         else if (pid is not null)
             processName = _processNameCache.TryGetRecent(pid.Value, sni);
 
-        if (processName is not null && _whitelist.IsAllowed(sni, processName))
+        // Processo de fora que acabou de ler arquivo de conta (token do Minecraft etc.) não
+        // fala com NINGUÉM na janela — stealer manda pra servidor próprio, não só pros
+        // domínios sensíveis — e nenhuma liberação vale por cima disso.
+        var accountRead = pid is not null ? _correlationTracker.TryGetRecentAccountRead(pid.Value) : null;
+        if (accountRead is null && !sensitive) return true;
+
+        if (accountRead is null && processName is not null && _whitelist.IsAllowed(sni, processName))
             return true;
 
         // Host de código (javaw, python...) liberado pelo usuário pra ESTE conjunto de
         // mods/scripts. Nunca vale se o processo acabou de ler arquivo sensível ou se a
         // investigação achou indicador de stealer.
-        if (processName is not null && pid is not null
+        if (accountRead is null && processName is not null && pid is not null
             && DomainWhitelistStore.IsCodeHost(processName)
             && _whitelist.HasFingerprintRule(sni, processName)
             && !_correlationTracker.HasRecentFileAccess(pid.Value)
@@ -297,8 +304,8 @@ public sealed class NetworkFilterWorker : BackgroundService
             }
         }
 
-        var correlatedFileAccess = pid is not null && _correlationTracker.HasRecentFileAccess(pid.Value);
-        var correlatedFilePath = pid is not null ? _correlationTracker.TryGetRecentFilePath(pid.Value) : null;
+        var correlatedFileAccess = accountRead is not null || (pid is not null && _correlationTracker.HasRecentFileAccess(pid.Value));
+        var correlatedFilePath = accountRead?.Path ?? (pid is not null ? _correlationTracker.TryGetRecentFilePath(pid.Value) : null);
         _blockStats.RecordBlock();
 
         _logger.LogWarning(
@@ -322,8 +329,10 @@ public sealed class NetworkFilterWorker : BackgroundService
                 CorrelatedFilePath = correlatedFilePath,
                 Protocol = isUdp ? "QUIC" : "TCP",
                 Investigation = pid is not null ? _blockInvestigator.TryGetCached(pid.Value) : null,
-                PlainLanguageMessage = correlatedFileAccess
-                    ? $"Bloqueamos uma tentativa de roubo: {processName ?? "um programa"} tentou enviar dados para {sni} logo após acessar seus arquivos."
+                PlainLanguageMessage = accountRead is { } read
+                    ? $"Bloqueamos um possível roubo de conta: {processName ?? "um programa"} leu seus dados de login do {read.App} e tentou enviar para {sni}."
+                    : correlatedFileAccess
+                    ?$"Bloqueamos uma tentativa de roubo: {processName ?? "um programa"} tentou enviar dados para {sni} logo após acessar seus arquivos."
                     : $"Bloqueamos uma conexão suspeita: {processName ?? "um programa"} tentou falar com {sni} sem autorização.",
             },
         });
