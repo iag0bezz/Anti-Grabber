@@ -21,9 +21,20 @@ whitelist.
 - **UnifiedAppLocator** encontra instalações de Discord, Steam, navegadores e
   launchers por 5 métodos combinados (processo em execução → registro →
   atalhos → paths padrão do AppData → varredura limitada de disco).
-- **TokenFileWatcher** observa os diretórios sensíveis detectados e
-  correlaciona com a rede: mesmo processo lendo arquivo sensível + abrindo
-  conexão de rede numa janela curta é sinal de alerta.
+  Canais de exfiltração (bot do Telegram, paste, upload anônimo, túnel) são
+  sensíveis sempre: só navegador passa sem liberação.
+- **TokenFileWatcher** vê **quem** abre cada arquivo sensível via ETW
+  (`Microsoft-Windows-Kernel-File`, PID + caminho em toda abertura) nos
+  perfis de todos os usuários. Ignora o próprio app dono e leitores do
+  Windows (Defender, indexador, Explorer — nome + pasta protegida). Processo
+  de fora que lê arquivo de **conta** (token de sessão dos launchers de
+  Minecraft: oficial, TLauncher, Prism, PolyMC, MultiMC, Modrinth,
+  CurseForge, ATLauncher, Lunar, Feather, Badlion) fica bloqueado na rede
+  para **qualquer** domínio por 60s.
+- **BlockInvestigator** investiga em segundo plano o processo bloqueado; em
+  host de código (javaw, python...) varre jars/scripts atrás de webhook,
+  bot do Telegram, caminho de token e roubo de sessão do Minecraft (leitura
+  do token + URL de envio no mesmo mod).
 - **Tray app** (Electron, `tray-ui/`) mostra o status (ocioso / protegendo /
   bloqueio recente) e um feed de atividade em linguagem simples, sem jargão
   técnico. Fala com o Service pelo mesmo named pipe de sempre — o protocolo
@@ -112,7 +123,22 @@ remova manualmente se quiser liberar o espaço.
 
 ## Testar
 
-O `AntiGrabber.TestHarness` prova que a proteção funciona sem nunca extrair
+**Toda proteção nova entra com self-test.** Os self-tests rodam offline (sem
+rede, sem WinDivert, sem admin) e o release só gera instalador se todos
+passarem:
+
+```powershell
+dotnet run --project AntiGrabber.TestHarness -- --test-mode --scenario=selftest-all
+```
+
+Pra adicionar um: função `Run...SelfTest()` com `Assert(cond, msg)` no
+`AntiGrabber.TestHarness/Program.cs`, registrada no dicionário `selfTests`,
+cobrindo o caso malicioso **e** o falso positivo.
+
+A sessão ETW real precisa de admin e fica fora do `selftest-all`
+(`--scenario=etw-smoke`, num terminal elevado).
+
+Cenários ao vivo (precisam do serviço rodando) — o `AntiGrabber.TestHarness` prova que a proteção funciona sem nunca extrair
 credencial real — o payload enviado é sempre a string sintética fixa
 `TEST_PAYLOAD_NAO_E_TOKEN_REAL|`, nunca derivada de um arquivo real.
 
@@ -124,22 +150,22 @@ Use um webhook criado por você mesmo para teste — nunca um webhook de
 terceiros. `PASS` = o AntiGrabberService bloqueou a conexão. `FAIL` = a
 conexão completou (falha de detecção a corrigir).
 
-Cenários disponíveis: `discord-webhook` (exige `--webhook-url` seu) e
+Cenários disponíveis: `discord-webhook` (exige `--webhook-url` seu),
 `steam-exfil` (usa `https://steamcommunity.com/` como destino público por
-padrão, não precisa de `--webhook-url`).
+padrão), `minecraft-account-exfil` (abre o arquivo de conta de um launcher
+instalado e tenta `https://example.com/` — tem que bloquear mesmo o domínio
+não sendo sensível) e `telegram-exfil` (só o canal de exfiltração, sem tocar
+arquivo).
 
 ## Limitações conhecidas
 
-- **Correlação "acesso a arquivo recente" é parcial.** `TokenFileWatcher`
-  usa `FileSystemWatcher` com `NotifyFilters.LastAccess`, mas o Windows por
-  padrão não atualiza o timestamp de último acesso em tempo real
-  (`fsutil behavior query disablelastaccess` = gerenciado pelo sistema) —
-  então leitura pura de um arquivo sensível (o padrão típico de um grabber)
-  muitas vezes não dispara evento nenhum. Escrita/criação/rename disparam
-  normalmente. **Isso não afeta o bloqueio em si** — quem bloqueia a
-  exfiltração é o `NetworkFilterWorker`, testado e funcionando independente
-  disso. Só a mensagem "bloqueamos um roubo" vs "bloqueamos uma conexão
-  suspeita" fica menos precisa.
+- **ETW entrega com ~1s de atraso.** Stealer que lê o arquivo de conta e
+  manda no mesmo segundo pode passar antes do registro da leitura.
+- **Mod que rouba a sessão e manda pra domínio próprio** (sem ser Discord,
+  Telegram ou canal conhecido) não é bloqueado pela rede: o token sai da
+  memória do jogo, não de arquivo. A varredura de mods só roda depois de um
+  bloqueio.
+- **Varredura de mods é estática**: string criptografada/ofuscada escapa.
 
 **Conta de usuário / login / sincronização em nuvem NÃO é uma opção
 futura** — é uma decisão de arquitetura permanente (ver seção acima).
