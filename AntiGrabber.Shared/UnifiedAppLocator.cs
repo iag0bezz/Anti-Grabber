@@ -130,12 +130,9 @@ public sealed class UnifiedAppLocator
 
     private AppInstallInfo? DetectByAppDataDefaultPath(SensitiveAppDefinition app)
     {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-
         foreach (var relative in app.RelativeAppDataPaths)
         {
-            foreach (var basePath in new[] { localAppData, appData })
+            foreach (var basePath in UserDataBases(UserProfileDirectories()))
             {
                 var candidate = Path.Combine(basePath, relative);
                 if (Directory.Exists(candidate))
@@ -172,27 +169,77 @@ public sealed class UnifiedAppLocator
     // install lives under Local, its data under Roaming) so a candidate only counts
     // if it actually contains one of the sensitive subpaths — matching by folder
     // name alone picks the wrong root.
-    private static string? ResolveSensitiveBase(SensitiveAppDefinition app)
+    //
+    // The service runs as LocalSystem, whose own AppData is the systemprofile one —
+    // so the roots come from every real user profile on the machine, not from the
+    // current process. Each profile with data contributes its own paths.
+    public static IReadOnlyList<string> ResolveSensitiveDirectories(SensitiveAppDefinition app, IEnumerable<string> profileDirs)
     {
-        if (app.RelativeAppDataPaths.Length == 0 || app.SensitiveSubPaths.Length == 0) return null;
+        var result = new List<string>();
+        if (app.RelativeAppDataPaths.Length == 0 || app.SensitiveSubPaths.Length == 0) return result;
 
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-
-        foreach (var relative in app.RelativeAppDataPaths)
+        foreach (var profile in profileDirs)
         {
-            foreach (var basePath in new[] { appData, localAppData })
+            foreach (var relative in app.RelativeAppDataPaths)
             {
-                var candidate = Path.Combine(basePath, relative);
-                var hasSensitiveData = app.SensitiveSubPaths.Any(sub =>
-                {
-                    var target = Path.Combine(candidate, sub);
-                    return Directory.Exists(target) || File.Exists(target);
-                });
-                if (hasSensitiveData) return candidate;
+                var root = UserDataBases(new[] { profile })
+                    .Select(b => Path.Combine(b, relative))
+                    .FirstOrDefault(candidate => app.SensitiveSubPaths.Any(sub => Exists(Path.Combine(candidate, sub))));
+                if (root is null) continue;
+                result.AddRange(app.SensitiveSubPaths.Select(sub => Path.Combine(root, sub)));
+                break;
             }
         }
-        return null;
+        return result;
+    }
+
+    // Subpath com curinga (ex: "ssfn*") existe se algum arquivo bate no diretório pai.
+    private static bool Exists(string path)
+    {
+        if (Directory.Exists(path) || File.Exists(path)) return true;
+        var name = Path.GetFileName(path);
+        if (!name.Contains('*')) return false;
+        var dir = Path.GetDirectoryName(path);
+        try { return dir is not null && Directory.Exists(dir) && Directory.EnumerateFileSystemEntries(dir, name).Any(); }
+        catch { return false; }
+    }
+
+    // ponytail: AppData no caminho padrão do perfil — redirecionamento de pasta (GPO) fica de fora.
+    private static IEnumerable<string> UserDataBases(IEnumerable<string> profileDirs)
+    {
+        foreach (var profile in profileDirs)
+        {
+            yield return Path.Combine(profile, "AppData", "Roaming");
+            yield return Path.Combine(profile, "AppData", "Local");
+            yield return profile; // ex: %USERPROFILE%\.lunarclient
+        }
+    }
+
+    /// Perfis de usuário reais (contas locais/Microsoft/domínio, SID S-1-5-21-*) do ProfileList.
+    public static IReadOnlyList<string> UserProfileDirectories()
+    {
+        var result = new List<string>();
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList");
+            foreach (var sid in key?.GetSubKeyNames() ?? Array.Empty<string>())
+            {
+                if (!sid.StartsWith("S-1-5-21-", StringComparison.Ordinal)) continue;
+                using var sub = key!.OpenSubKey(sid);
+                if (sub?.GetValue("ProfileImagePath") is string path)
+                {
+                    path = Environment.ExpandEnvironmentVariables(path);
+                    if (Directory.Exists(path)) result.Add(path);
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        var current = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (result.Count == 0 && Directory.Exists(current)) result.Add(current);
+        return result;
     }
 
     private static string? ScanForExecutable(string root, string exeName, int maxDepth)
@@ -221,10 +268,9 @@ public sealed class UnifiedAppLocator
 
     private static AppInstallInfo BuildInfo(SensitiveAppDefinition app, string installPath, DetectionMethod method)
     {
-        var sensitiveBase = ResolveSensitiveBase(app) ?? installPath;
-        var sensitiveDirs = app.SensitiveSubPaths
-            .Select(sub => Path.Combine(sensitiveBase, sub))
-            .ToList();
+        var sensitiveDirs = ResolveSensitiveDirectories(app, UserProfileDirectories()).ToList();
+        if (sensitiveDirs.Count == 0)
+            sensitiveDirs = app.SensitiveSubPaths.Select(sub => Path.Combine(installPath, sub)).ToList();
 
         return new AppInstallInfo(
             app.AppId,
