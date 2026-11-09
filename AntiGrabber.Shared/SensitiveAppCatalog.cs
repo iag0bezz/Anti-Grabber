@@ -17,6 +17,23 @@ public sealed record SensitiveAppDefinition(
 
 public static class SensitiveAppCatalog
 {
+    // Canais que stealer usa pra despejar token/conta (bot do Telegram, paste, upload
+    // anônimo, captura de request, túnel). Sensíveis sempre, independente de app
+    // detectado: só navegador passa sem liberação. O feed assinado pode somar mais.
+    public static readonly IReadOnlyList<string> ExfiltrationDomains = new[]
+    {
+        "api.telegram.org",
+        "pastebin.com", "paste.ee", "hastebin.com", "rentry.co",
+        "transfer.sh", "file.io", "gofile.io", "catbox.moe", "0x0.st", "temp.sh",
+        "webhook.site", "pipedream.net", "requestcatcher.com",
+        "ngrok.io", "ngrok-free.app", "ngrok.app", "trycloudflare.com",
+    };
+
+    public static readonly IReadOnlyList<string> Browsers = new[]
+    {
+        "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe",
+    };
+
     public static readonly IReadOnlyList<SensitiveAppDefinition> Apps = new[]
     {
         new SensitiveAppDefinition(

@@ -96,6 +96,8 @@ public sealed class DomainWhitelistStore
         lock (_lock)
         {
             _catalogEntries = new(StringComparer.OrdinalIgnoreCase);
+            foreach (var domain in SensitiveAppCatalog.ExfiltrationDomains)
+                AddCatalog(domain, SensitiveAppCatalog.Browsers);
             foreach (var app in installs)
             {
                 foreach (var domain in app.AllowedDomains)
