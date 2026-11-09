@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using AntiGrabber.Service.FileWatch;
 using AntiGrabber.Service.Network;
 using AntiGrabber.Shared;
 using WindivertDotnet;
@@ -10,6 +11,11 @@ var scenarios = new Dictionary<string, ScenarioDefinition>(StringComparer.Ordina
 {
     ["discord-webhook"] = new("discord", "Discord", DefaultTargetUrl: null),
     ["steam-exfil"] = new("steam", "Steam", DefaultTargetUrl: "https://steamcommunity.com/"),
+    // Lê (só abre) o arquivo de conta de um launcher e tenta falar com domínio comum:
+    // tem que bloquear mesmo example.com não sendo sensível. Precisa do serviço rodando.
+    ["minecraft-account-exfil"] = new("minecraft-any", "Minecraft", DefaultTargetUrl: "https://example.com/"),
+    // Sem tocar arquivo nenhum: só o canal de exfiltração tem que bastar pra bloquear.
+    ["telegram-exfil"] = new("none", "nenhum arquivo", DefaultTargetUrl: "https://api.telegram.org/"),
 };
 
 // Self-tests offline: sem rede, sem WinDivert, sem admin. Toda proteção nova entra
@@ -25,6 +31,7 @@ var selfTests = new Dictionary<string, Func<Task<int>>>(StringComparer.OrdinalIg
     ["user-profiles-selftest"] = () => Task.FromResult(RunUserProfilesSelfTest()),
     ["minecraft-catalog-selftest"] = () => Task.FromResult(RunMinecraftCatalogSelfTest()),
     ["exfil-domains-selftest"] = () => Task.FromResult(RunExfilDomainsSelfTest()),
+    ["account-read-selftest"] = () => Task.FromResult(RunAccountReadSelfTest()),
 };
 const string AllSelfTestsScenario = "selftest-all";
 
@@ -50,6 +57,10 @@ if (string.Equals(options.Scenario, AllSelfTestsScenario, StringComparison.Ordin
 
 if (selfTests.TryGetValue(options.Scenario, out var selfTest))
     return await RunSelfTestAsync(options.Scenario, selfTest);
+
+// Fora do selftest-all: precisa de admin (sessão ETW real), não roda em CI.
+if (string.Equals(options.Scenario, "etw-smoke", StringComparison.OrdinalIgnoreCase))
+    return await RunSelfTestAsync(options.Scenario, RunEtwSmokeAsync);
 
 if (!scenarios.TryGetValue(options.Scenario, out var scenario))
 {
@@ -86,7 +97,10 @@ return blocked ? 0 : 1;
 static void TouchSensitiveFile(string appId, string displayName)
 {
     var locator = new UnifiedAppLocator();
-    var app = locator.DetectAll().FirstOrDefault(a => a.AppId == appId);
+    // "minecraft-any": primeiro launcher de Minecraft com arquivo de conta nesta máquina.
+    var app = locator.DetectAll().FirstOrDefault(a => appId == "minecraft-any"
+        ? SensitiveAppCatalog.Apps.Any(d => d.AppId == a.AppId && d.AccountData) && a.SensitiveDirectories.Any(p => File.Exists(p) || Directory.Exists(Path.GetDirectoryName(p)))
+        : a.AppId == appId);
     if (app is null)
     {
         Console.WriteLine($"{displayName} não encontrado nesta máquina — pulando etapa de acesso a arquivo (só testa a rede).");
@@ -95,10 +109,13 @@ static void TouchSensitiveFile(string appId, string displayName)
 
     foreach (var dir in app.SensitiveDirectories)
     {
-        var existingDir = Directory.Exists(dir) ? dir : Path.GetDirectoryName(dir);
-        if (existingDir is null || !Directory.Exists(existingDir)) continue;
-
-        var file = Directory.EnumerateFiles(existingDir).FirstOrDefault();
+        // Caminho pode ser pasta, arquivo ou curinga ("launcher_accounts*.json").
+        var parent = Path.GetDirectoryName(dir);
+        var file = Directory.Exists(dir)
+            ? Directory.EnumerateFiles(dir).FirstOrDefault()
+            : parent is not null && Directory.Exists(parent)
+                ? Directory.EnumerateFiles(parent, Path.GetFileName(dir)).FirstOrDefault()
+                : null;
         if (file is null) continue;
 
         try
@@ -753,6 +770,105 @@ static int RunExfilDomainsSelfTest()
     }
 
     Console.WriteLine("PASS — exfiltração: Telegram/paste/upload/túnel sensíveis sem app detectado, navegador passa, javaw/python/curl bloqueados, Mojang livre.");
+    return 0;
+}
+
+// Leitura de arquivo de conta: quem conta como dono, leitor confiável do Windows, casamento
+// de caminho (pasta/arquivo/curinga, formato de dispositivo do ETW) e janela do tracker.
+// A sessão ETW em si precisa de admin — coberta pelo cenário minecraft-account-exfil.
+static int RunAccountReadSelfTest()
+{
+    SensitiveAppDefinition App(string id) => SensitiveAppCatalog.Apps.Single(a => a.AppId == id);
+    var official = App("minecraft");
+    var tlauncher = App("tlauncher");
+
+    // Dono
+    Assert(TokenFileWatcher.IsOwner(official, "MinecraftLauncher.exe", null), "launcher oficial não é dono");
+    Assert(!TokenFileWatcher.IsOwner(official, "stealer.exe", null), "processo qualquer virou dono");
+    Assert(!TokenFileWatcher.IsOwner(official, "javaw.exe", "javaw -jar tlauncher.jar"), "javaw virou dono do launcher oficial");
+    Assert(TokenFileWatcher.IsOwner(tlauncher, "javaw.exe", @"javaw -jar C:\Users\a\AppData\Roaming\.tlauncher\TLauncher.jar"), "javaw do TLauncher não é dono");
+    Assert(!TokenFileWatcher.IsOwner(tlauncher, "javaw.exe", @"javaw -cp x.jar net.minecraft.client.main.Main --gameDir C:\x\.tlauncher --accessToken y"),
+        "jogo (com mods) virou dono só por citar tlauncher");
+    Assert(!TokenFileWatcher.IsOwner(tlauncher, "python.exe", "python -c tlauncher"), "python virou dono");
+
+    // Leitor confiável: nome + pasta protegida; nome forjado fora dela não vale.
+    var windir = Environment.ExpandEnvironmentVariables("%SystemRoot%");
+    Assert(TokenFileWatcher.IsTrustedSystemReader(Path.Combine(windir, "explorer.exe")), "Explorer não é confiável");
+    Assert(TokenFileWatcher.IsTrustedSystemReader(Path.Combine(Environment.ExpandEnvironmentVariables("%ProgramData%"), @"Microsoft\Windows Defender\Platform\4.18.1\MsMpEng.exe")), "Defender não é confiável");
+    Assert(!TokenFileWatcher.IsTrustedSystemReader(@"C:\Users\a\AppData\Local\Temp\MsMpEng.exe"), "MsMpEng forjado virou confiável");
+    Assert(!TokenFileWatcher.IsTrustedSystemReader(Path.Combine(windir, @"System32\curl.exe")), "curl do System32 virou confiável");
+    Assert(!TokenFileWatcher.IsTrustedSystemReader(Path.Combine(windir, @"System32\WindowsPowerShell\v1.0\powershell.exe")), "powershell virou confiável");
+
+    // Caminho: ETW manda formato de dispositivo; o vigiado é convertido uma vez.
+    var volumes = new Dictionary<string, string> { ["C:"] = @"\Device\HarddiskVolume3" };
+    var accounts = TokenFileWatcher.ToNtPath(@"C:\Users\a\AppData\Roaming\.minecraft\launcher_accounts*.json", volumes)!;
+    var leveldb = TokenFileWatcher.ToNtPath(@"C:\Users\a\AppData\Roaming\discord\Local Storage\leveldb", volumes)!;
+    Assert(accounts == @"\Device\HarddiskVolume3\Users\a\AppData\Roaming\.minecraft\launcher_accounts*.json", $"ToNtPath: {accounts}");
+    Assert(TokenFileWatcher.ToNtPath(@"D:\x", volumes) is null, "drive desconhecido convertido");
+    Assert(TokenFileWatcher.ToDosPath(@"\Device\HarddiskVolume3\Users\a\f.json", volumes) == @"C:\Users\a\f.json", "ToDosPath");
+
+    var watched = new[] { new TokenFileWatcher.WatchedPath(accounts, official), new TokenFileWatcher.WatchedPath(leveldb, App("discord")) };
+    var nt = @"\Device\HarddiskVolume3\Users\a\AppData\Roaming\";
+    Assert(TokenFileWatcher.Match(nt + @".minecraft\launcher_accounts_microsoft_store.json", watched)?.App.AppId == "minecraft", "curinga de conta não casou");
+    Assert(TokenFileWatcher.Match(nt + @".minecraft\LAUNCHER_ACCOUNTS.JSON", watched) is not null, "maiúsculas não casaram");
+    Assert(TokenFileWatcher.Match(nt + @".minecraft\launcher_profiles.json", watched) is null, "launcher_profiles (sem token) casou");
+    Assert(TokenFileWatcher.Match(nt + @".minecraft\sub\launcher_accounts.json", watched) is null, "curinga casou em subpasta");
+    Assert(TokenFileWatcher.Match(nt + @"discord\Local Storage\leveldb\000003.log", watched)?.App.AppId == "discord", "arquivo dentro de pasta vigiada não casou");
+    Assert(TokenFileWatcher.Match(nt + @"discord\Local Storage\leveldb-old\x", watched) is null, "pasta com prefixo parecido casou");
+
+    // Tracker: leitura de conta vale 60s pro PID, liga o atalho global e some depois.
+    var now = new DateTime(2026, 11, 8, 12, 0, 0, DateTimeKind.Utc);
+    var tracker = new CorrelationTracker(() => now);
+    Assert(!tracker.AnyRecentAccountRead && tracker.TryGetRecentAccountRead(42) is null, "tracker novo já com leitura");
+    tracker.RecordAccountRead(42, @"C:\x\accounts.json", "Prism Launcher");
+    now = now.AddSeconds(30);
+    Assert(tracker.AnyRecentAccountRead && tracker.TryGetRecentAccountRead(42) is { App: "Prism Launcher" }, "leitura de conta não ficou registrada");
+    Assert(tracker.TryGetRecentAccountRead(43) is null, "leitura vazou pra outro PID");
+    Assert(!tracker.HasRecentFileAccess(42), "janela curta de correlação deveria ter passado");
+    now = now.AddSeconds(31);
+    Assert(!tracker.AnyRecentAccountRead && tracker.TryGetRecentAccountRead(42) is null, "leitura de conta não expirou em 60s");
+
+    Console.WriteLine("PASS — leitura de conta: dono (incl. javaw do TLauncher vs jogo), leitor confiável sem nome forjado, caminho ETW/curinga e janela de 60s.");
+    return 0;
+}
+
+// Sessão ETW de verdade (provider/keyword/evento/campo FileName): abre um arquivo de
+// conta falso numa pasta temporária e espera o evento chegar com o PID deste processo.
+static async Task<int> RunEtwSmokeAsync()
+{
+    var dir = Directory.CreateTempSubdirectory("ag-etw-").FullName;
+    var file = Path.Combine(dir, "launcher_accounts.json");
+    File.WriteAllText(file, "{}");
+    var volumes = TokenFileWatcher.VolumeMap();
+    var nt = TokenFileWatcher.ToNtPath(Path.Combine(dir, "launcher_accounts*.json"), volumes)
+        ?? throw new InvalidOperationException("FAIL — volume da pasta temporária sem caminho de dispositivo");
+    var watched = new[] { new TokenFileWatcher.WatchedPath(nt, SensitiveAppCatalog.Apps.Single(a => a.AppId == "minecraft")) };
+
+    var seen = new TaskCompletionSource<(int Pid, string File)>(TaskCreationOptions.RunContinuationsAsynchronously);
+    using var cts = new CancellationTokenSource();
+    var etw = Task.Run(() => TokenFileWatcher.RunEtw("AntiGrabber-EtwSmoke", watched, (pid, f, _) => seen.TrySetResult((pid, f)), cts.Token));
+    try
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+        while (!seen.Task.IsCompleted && DateTime.UtcNow < deadline)
+        {
+            if (etw.IsFaulted) await etw; // sem admin: UnauthorizedAccessException aqui
+            using (File.OpenRead(file)) { }
+            await Task.WhenAny(seen.Task, Task.Delay(500));
+        }
+        Assert(seen.Task.IsCompleted, "nenhum evento ETW de abertura em 15s");
+        var (pid, opened) = await seen.Task;
+        Assert(pid == Environment.ProcessId, $"PID do evento {pid} != {Environment.ProcessId}");
+        Assert(TokenFileWatcher.ToDosPath(opened, volumes).Equals(file, StringComparison.OrdinalIgnoreCase), $"caminho do evento: {opened}");
+    }
+    finally
+    {
+        cts.Cancel();
+        try { await etw; } catch { }
+        Directory.Delete(dir, recursive: true);
+    }
+
+    Console.WriteLine("PASS — ETW Kernel-File: abertura de arquivo de conta vista com PID e caminho corretos.");
     return 0;
 }
 
