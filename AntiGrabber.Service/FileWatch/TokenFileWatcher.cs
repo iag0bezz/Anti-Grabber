@@ -68,19 +68,41 @@ public sealed class TokenFileWatcher : BackgroundService
     {
         using var session = new TraceEventSession(sessionName);
         using var stop = ct.Register(() => session.Dispose());
+        _activeSession = session;
         session.EnableProvider(KernelFileProvider, TraceEventLevel.Informational, KernelFileKeywordCreate);
 
         // Kernel-File é provider de manifesto registrado no Windows → parser via TDH.
         new RegisteredTraceEventParser(session.Source).All += e =>
         {
+            // Marca d'água: o handler é síncrono e em ordem, então ver um evento com horário T
+            // garante que toda leitura de conta anterior a T já foi processada.
+            Interlocked.Exchange(ref _watermarkUtcTicks, e.TimeStamp.ToUniversalTime().Ticks);
             if ((int)e.ID != CreateEventId || e.ProcessID <= 4) return;
             if (e.PayloadByName("FileName") is not string fileName) return;
             if (Match(fileName, watched) is { } hit) onOpen(e.ProcessID, fileName, hit);
         };
 
-        // ponytail: entrega em tempo real tem ~1s de buffer do ETW; stealer que lê e manda
-        // no mesmo segundo pode passar antes do registro. Callback síncrono do kernel resolveria.
-        session.Source.Process();
+        // Entrega em tempo real tem ~1s de buffer do ETW; stealer que lê e manda no mesmo
+        // segundo passaria antes do registro. O NetworkFilterWorker segura a conexão de code
+        // host por um instante e chama FlushEtw() pra fechar essa corrida.
+        // ponytail: callback síncrono do kernel (minifilter) eliminaria a espera.
+        try { session.Source.Process(); }
+        finally { _activeSession = null; }
+    }
+
+    private static volatile TraceEventSession? _activeSession;
+    private static long _watermarkUtcTicks;
+
+    public static bool EtwActive => _activeSession is not null;
+
+    /// Horário (UTC) do evento ETW mais recente já processado.
+    public static DateTime EtwWatermarkUtc => new(Interlocked.Read(ref _watermarkUtcTicks), DateTimeKind.Utc);
+
+    /// Força o ETW a entregar agora os eventos em buffer (em vez de esperar o timer de ~1s).
+    public static void FlushEtw()
+    {
+        try { _activeSession?.Flush(); }
+        catch { /* sessão fechando — a espera do chamador cobre o resto */ }
     }
 
     public static IReadOnlyDictionary<string, string> VolumeMap() => DosToNtVolumes();

@@ -860,6 +860,20 @@ static int RunBlockedFlowsSelfTest()
     Assert(!blocked.IsBlocked(flow, t0.AddSeconds(31)), "bloqueio deveria expirar depois do TTL");
     Assert(blocked.Count == 0, $"entrada expirada deveria ter sido varrida, sobrou {blocked.Count}");
 
+    // Espera da corrida do ETW: fluxo segurado cai enquanto espera e volta a passar quando
+    // a decisão libera.
+    var held = new BlockedFlows<TcpFlowKey>(TimeSpan.FromSeconds(5));
+    held.Add(flow, t0);
+    Assert(held.IsBlocked(flow, t0.AddMilliseconds(200)), "retransmissão durante a espera do ETW deveria cair");
+    held.Remove(flow);
+    Assert(!held.IsBlocked(flow, t0.AddMilliseconds(301)), "fluxo liberado depois da espera não pode continuar retido");
+
+    // Isenção da espera: só Mojang/Microsoft de verdade, com fronteira de rótulo.
+    foreach (var d in new[] { "sessionserver.mojang.com", "api.minecraftservices.com", "textures.minecraft.net", "user.auth.xboxlive.com", "login.live.com", "MOJANG.COM" })
+        Assert(NetworkFilterWorker.IsMinecraftAuthDomain(d), $"{d} deveria ser domínio de auth do Minecraft");
+    foreach (var d in new[] { "evilmojang.com", "mojang.com.attacker.io", "example.com", "discord.com", "minecraft.net-login.ru" })
+        Assert(!NetworkFilterWorker.IsMinecraftAuthDomain(d), $"{d} não pode herdar a isenção da Mojang");
+
     var udp = new BlockedFlows<UdpFlowKey>(TimeSpan.FromSeconds(30));
     var quic = new UdpFlowKey(IPAddress.Parse("10.0.0.1"), 52000, IPAddress.Parse("162.159.137.232"), 443);
     udp.Add(quic, t0);
@@ -874,7 +888,7 @@ static int RunBlockedFlowsSelfTest()
     writable.AckNum = 0x0A0B0C0Du;
     Assert(header[8] == 0x0A && header[11] == 0x0D, "TcpHeader.AckNum deveria ser gravado big-endian no pacote");
 
-    Console.WriteLine("PASS — fluxo bloqueado: retransmissão/continuação/FIN do mesmo 5-tuple descartados por 30s, outras conexões livres, TCP e QUIC; seq/ack em ordem de host pro RST.");
+    Console.WriteLine("PASS — fluxo bloqueado: retransmissão/continuação/FIN do mesmo 5-tuple descartados por 30s, outras conexões livres, TCP e QUIC; espera do ETW retém e solta; isenção Mojang só com fronteira de rótulo; seq/ack em ordem de host pro RST.");
     return 0;
 }
 

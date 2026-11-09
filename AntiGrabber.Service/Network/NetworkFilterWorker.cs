@@ -24,6 +24,11 @@ public sealed class NetworkFilterWorker : BackgroundService
     // porta local efêmera pro mesmo destino dentro disso é improvável.
     private readonly BlockedFlows<TcpFlowKey> _blockedTcp = new(TimeSpan.FromSeconds(30));
     private readonly BlockedFlows<UdpFlowKey> _blockedUdp = new(TimeSpan.FromSeconds(30));
+    // Fluxos com a decisão adiada pela corrida do ETW: retransmissões caem enquanto isso.
+    // TTL = teto de segurança caso a tarefa que decide morra sem remover.
+    private readonly BlockedFlows<TcpFlowKey> _heldTcp = new(TimeSpan.FromSeconds(5));
+    // Teto da espera pela marca d'água do ETW (normalmente bem menos).
+    private static readonly TimeSpan EtwMaxGrace = TimeSpan.FromMilliseconds(1500);
 
     public NetworkFilterWorker(
         ILogger<NetworkFilterWorker> logger,
@@ -127,7 +132,8 @@ public sealed class NetworkFilterWorker : BackgroundService
 
         // Fluxo já bloqueado: descarta tudo (retransmissão, continuação, FIN) antes de
         // qualquer caminho fail-open abaixo.
-        if (flowKey is { } blockedKey && _blockedTcp.IsBlocked(blockedKey, DateTime.UtcNow))
+        if (flowKey is { } blockedKey
+            && (_blockedTcp.IsBlocked(blockedKey, DateTime.UtcNow) || _heldTcp.IsBlocked(blockedKey, DateTime.UtcNow)))
             return;
 
         // Fragmento de continuação de um ClientHello já em reassembly (não começa com
@@ -177,6 +183,9 @@ public sealed class NetworkFilterWorker : BackgroundService
             await ForwardAsync(divert, packet, address, ct);
             return;
         }
+
+        if (flowKey is { } heldKey && TryHoldForEtw(divert, heldKey, sni, SrcPortOf(parsed), FamilyOf(parsed), packet, address, ct))
+            return;
 
         var allow = await DecideAsync(sni, SrcPortOf(parsed), FamilyOf(parsed), isUdp: false, ct);
         if (allow)
@@ -256,6 +265,12 @@ public sealed class NetworkFilterWorker : BackgroundService
                 break;
 
             case ReassemblyStatus.Ready:
+                if (TryHoldForEtw(divert, key, result.Sni!, result.LocalPort, result.Family, current, currentAddress, ct))
+                {
+                    await FlushAsync(divert, result.Flush!, forward: false, ct);
+                    break;
+                }
+
                 var allow = await DecideAsync(result.Sni!, result.LocalPort, result.Family, isUdp: false, ct);
                 if (allow)
                 {
@@ -302,6 +317,85 @@ public sealed class NetworkFilterWorker : BackgroundService
                 await FlushAsync(divert, flow, forward: true, ct);
         }
     }
+
+    /// Corrida do ETW: a leitura do arquivo de conta só chega ~1s depois. Code host
+    /// (javaw/node/python...) indo pra domínio de terceiro sem leitura conhecida tem o
+    /// segmento final do ClientHello segurado até o ETW alcançar o instante da conexão (teto
+    /// EtwMaxGrace) — fora do laço, o resto do
+    /// tráfego segue — enquanto o ETW é forçado a entregar; aí decide de novo. Domínios
+    /// sensíveis já bloqueiam sem esperar, e Mojang/Microsoft passam direto (mandar o
+    /// token pra própria Mojang não é roubo; assim login/skins/Realms não sentem).
+    private bool TryHoldForEtw(WinDivert divert, TcpFlowKey key, string sni, ushort localPort, AddressFamily family,
+        WinDivertPacket current, WinDivertAddress currentAddress, CancellationToken ct)
+    {
+        if (!TokenFileWatcher.EtwActive || IsMinecraftAuthDomain(sni) || _whitelist.IsSensitiveDomain(sni)) return false;
+
+        var pid = TcpProcessResolver.ResolvePidByLocalPort(localPort, family);
+        if (pid is null || _correlationTracker.TryGetRecentAccountRead(pid.Value) is not null) return false;
+        if (TryGetProcessName(pid) is not { } processName || !DomainWhitelistStore.IsCodeHost(processName)) return false;
+
+        var holdStartUtc = DateTime.UtcNow;
+        _heldTcp.Add(key, holdStartUtc);
+        var packet = current.Clone();
+        var address = currentAddress.Clone();
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // Espera o ETW passar do instante da conexão: aí qualquer leitura de conta
+                // feita antes dela já está no CorrelationTracker.
+                var deadline = holdStartUtc + EtwMaxGrace;
+                var nextFlush = DateTime.MinValue;
+                while (TokenFileWatcher.EtwWatermarkUtc < holdStartUtc && DateTime.UtcNow < deadline)
+                {
+                    if (DateTime.UtcNow >= nextFlush)
+                    {
+                        TokenFileWatcher.FlushEtw();
+                        nextFlush = DateTime.UtcNow.AddMilliseconds(100);
+                    }
+                    await Task.Delay(10, ct);
+                }
+                var waitedMs = (int)(DateTime.UtcNow - holdStartUtc).TotalMilliseconds;
+                _logger.Log(DateTime.UtcNow >= deadline ? LogLevel.Warning : LogLevel.Debug,
+                    "Conexão de {Process} (pid={Pid}) para {Domain} segurada {Ms}ms aguardando o ETW{Timeout}.",
+                    processName, pid, sni, waitedMs, DateTime.UtcNow >= deadline ? " (estourou o teto — decidiu sem confirmação do ETW)" : "");
+
+                var allow = await DecideAsync(sni, localPort, family, isUdp: false, ct);
+                if (allow)
+                {
+                    _heldTcp.Remove(key);
+                    await ForwardAsync(divert, packet, address, ct);
+                }
+                else
+                {
+                    _blockedTcp.Add(key, DateTime.UtcNow);
+                    _heldTcp.Remove(key);
+                    await InjectResetAsync(divert, packet, address, ct);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { _logger.LogWarning(ex, "Erro decidindo fluxo segurado de {Process} -> {Domain}.", processName, sni); }
+            finally
+            {
+                packet.Dispose();
+                address.Dispose();
+            }
+        }, CancellationToken.None);
+        return true;
+    }
+
+    private static readonly string[] MinecraftAuthDomains =
+    [
+        "mojang.com", "minecraft.net", "minecraftservices.com", "minecraft-services.net",
+        "xboxlive.com", "live.com", "microsoftonline.com",
+    ];
+
+    /// Login/sessão/skins/Realms do Minecraft (Mojang + conta Microsoft/Xbox). Sufixo com
+    /// fronteira de rótulo: "evilmojang.com" não conta.
+    public static bool IsMinecraftAuthDomain(string sni) =>
+        MinecraftAuthDomains.Any(d => sni.Equals(d, StringComparison.OrdinalIgnoreCase)
+            || sni.EndsWith("." + d, StringComparison.OrdinalIgnoreCase));
 
     private async Task<bool> DecideAsync(string sni, ushort localPort, AddressFamily family, bool isUdp, CancellationToken ct)
     {

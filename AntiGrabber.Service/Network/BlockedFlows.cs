@@ -7,7 +7,8 @@ namespace AntiGrabber.Service.Network;
 /// bufferizada, expirava, era liberada, e o 2º segmento passava como Invalid: conexão
 /// completa com um único "Bloqueado" no log.
 ///
-/// Sem lock: só é usado pelo laço único de recepção do NetworkFilterWorker.
+/// Também serve pra fluxos "em espera" (decisão adiada pela corrida do ETW): o laço de
+/// recepção consulta, e a tarefa que decide depois adiciona/remove — por isso o lock.
 public sealed class BlockedFlows<TKey> where TKey : notnull
 {
     private readonly Dictionary<TKey, DateTime> _until = new();
@@ -16,14 +17,19 @@ public sealed class BlockedFlows<TKey> where TKey : notnull
 
     public BlockedFlows(TimeSpan ttl) => _ttl = ttl;
 
-    public int Count => _until.Count;
+    public int Count { get { lock (_until) return _until.Count; } }
 
-    public void Add(TKey key, DateTime nowUtc) => _until[key] = nowUtc + _ttl;
+    public void Add(TKey key, DateTime nowUtc) { lock (_until) _until[key] = nowUtc + _ttl; }
+
+    public void Remove(TKey key) { lock (_until) _until.Remove(key); }
 
     public bool IsBlocked(TKey key, DateTime nowUtc)
     {
-        Sweep(nowUtc);
-        return _until.TryGetValue(key, out var until) && until > nowUtc;
+        lock (_until)
+        {
+            Sweep(nowUtc);
+            return _until.TryGetValue(key, out var until) && until > nowUtc;
+        }
     }
 
     private void Sweep(DateTime nowUtc)
