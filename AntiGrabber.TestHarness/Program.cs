@@ -23,6 +23,8 @@ var selfTests = new Dictionary<string, Func<Task<int>>>(StringComparer.OrdinalIg
     ["quic-wiring-selftest"] = RunQuicWiringSelfTestAsync,
     ["jar-scan-selftest"] = () => Task.FromResult(RunJarScanSelfTest()),
     ["user-profiles-selftest"] = () => Task.FromResult(RunUserProfilesSelfTest()),
+    ["minecraft-catalog-selftest"] = () => Task.FromResult(RunMinecraftCatalogSelfTest()),
+    ["exfil-domains-selftest"] = () => Task.FromResult(RunExfilDomainsSelfTest()),
 };
 const string AllSelfTestsScenario = "selftest-all";
 
@@ -667,6 +669,90 @@ static int RunUserProfilesSelfTest()
     }
 
     Console.WriteLine("PASS — perfis de usuário: dados em cada perfil real, Roaming vs Local, perfil sem dados ignorado, curinga e raiz do perfil.");
+    return 0;
+}
+
+// Launchers de Minecraft: cada um acha o arquivo de conta no perfil, é AccountData e
+// NUNCA traz domínio no catálogo (sessionserver/minecraftservices viraria sensível e o
+// javaw do jogo — code host — perderia o multiplayer).
+static int RunMinecraftCatalogSelfTest()
+{
+    var root = Directory.CreateTempSubdirectory("ag-mc-").FullName;
+    try
+    {
+        void Touch(params string[] parts)
+        {
+            var path = Path.Combine(new[] { root }.Concat(parts).ToArray());
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, "{}");
+        }
+
+        Touch("AppData", "Roaming", ".minecraft", "launcher_accounts_microsoft_store.json");
+        Touch("AppData", "Roaming", ".minecraft", "launcher_msa_credentials_microsoft_store.bin");
+        Touch("AppData", "Roaming", ".minecraft", "launcher_profiles.json");
+        Touch("AppData", "Roaming", "PrismLauncher", "accounts.json");
+        Touch("AppData", "Roaming", "ModrinthApp", "app.db");
+        Touch(".lunarclient", "settings", "game", "accounts.json");
+
+        string[] Resolve(string appId) => UnifiedAppLocator.ResolveSensitiveDirectories(
+            SensitiveAppCatalog.Apps.Single(a => a.AppId == appId), new[] { root }).ToArray();
+
+        var official = Resolve("minecraft");
+        Assert(official.Length == 2 && official.All(p => p.Contains(".minecraft")), $"launcher oficial: [{string.Join(", ", official)}]");
+        Assert(Resolve("prismlauncher").SequenceEqual(new[] { Path.Combine(root, "AppData", "Roaming", "PrismLauncher", "accounts.json") }), "Prism não achado");
+        Assert(Resolve("modrinth").Length == 1, "Modrinth não achado");
+        Assert(Resolve("lunarclient").SequenceEqual(new[] { Path.Combine(root, ".lunarclient", "settings", "game", "accounts.json") }), "Lunar (raiz do perfil) não achado");
+        Assert(Resolve("tlauncher").Length == 0 && Resolve("feather").Length == 0, "launcher sem arquivo de conta virou alvo");
+
+        var minecraftIds = new[] { "minecraft", "tlauncher", "prismlauncher", "polymc", "multimc", "modrinth", "curseforge", "atlauncher", "lunarclient", "feather", "badlion" };
+        foreach (var id in minecraftIds)
+        {
+            var app = SensitiveAppCatalog.Apps.SingleOrDefault(a => a.AppId == id);
+            Assert(app is { AccountData: true } && app.AllowedDomains.Length == 0, $"{id}: precisa existir, ser AccountData e não ter AllowedDomains");
+        }
+        Assert(SensitiveAppCatalog.Apps.SelectMany(a => a.AllowedDomains).All(d => !d.Contains("mojang") && !d.Contains("minecraft")),
+            "domínio Mojang/Minecraft no catálogo quebraria o multiplayer");
+        Assert(SensitiveAppCatalog.Apps.Where(a => a.OwnerCommandLineHints is not null).Select(a => a.AppId).OrderBy(x => x).SequenceEqual(new[] { "atlauncher", "tlauncher" }),
+            "só launcher em Java precisa de dica de linha de comando");
+    }
+    finally
+    {
+        Directory.Delete(root, recursive: true);
+    }
+
+    Console.WriteLine("PASS — catálogo Minecraft: oficial/Prism/Modrinth/Lunar achados no perfil, todos AccountData, nenhum domínio Mojang no catálogo.");
+    return 0;
+}
+
+// Canais de exfiltração: sensíveis sem depender de app detectado, navegador passa,
+// host de código e programa qualquer não. Domínio comum continua livre.
+static int RunExfilDomainsSelfTest()
+{
+    var file = Path.Combine(Path.GetTempPath(), $"ag-rules-{Guid.NewGuid():N}.json");
+    try
+    {
+        var store = new DomainWhitelistStore(file);
+        store.SeedFromCatalog(Array.Empty<AppInstallInfo>());
+
+        foreach (var domain in new[] { "api.telegram.org", "pastebin.com", "abc123.ngrok-free.app", "x-y.trycloudflare.com", "webhook.site:443" })
+            Assert(store.IsSensitiveDomain(domain), $"{domain} deveria ser sensível");
+        foreach (var domain in new[] { "telegram.org", "example.com", "sessionserver.mojang.com", "api.minecraftservices.com" })
+            Assert(!store.IsSensitiveDomain(domain), $"{domain} não deveria ser sensível");
+
+        Assert(store.IsAllowed("api.telegram.org", "chrome.exe") && store.IsAllowed("pastebin.com", "FIREFOX.EXE"), "navegador bloqueado em canal de exfiltração");
+        foreach (var process in new[] { "javaw.exe", "python.exe", "curl.exe", "stealer.exe" })
+            Assert(!store.IsAllowed("api.telegram.org", process), $"{process} liberado no bot do Telegram");
+
+        // Liberação explícita do usuário continua funcionando pra programa comum.
+        Assert(store.AllowAlways("transfer.sh", "curl.exe") && store.IsAllowed("transfer.sh", "curl.exe"), "liberação do usuário ignorada");
+        Assert(!store.AllowAlways("api.telegram.org", "javaw.exe"), "code host liberado só pelo nome");
+    }
+    finally
+    {
+        File.Delete(file);
+    }
+
+    Console.WriteLine("PASS — exfiltração: Telegram/paste/upload/túnel sensíveis sem app detectado, navegador passa, javaw/python/curl bloqueados, Mojang livre.");
     return 0;
 }
 
