@@ -20,6 +20,9 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - name: Self-tests
+        run: dotnet run --project AntiGrabber.TestHarness -c Release -- --test-mode --scenario=selftest-all
+
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
