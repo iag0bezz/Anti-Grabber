@@ -33,6 +33,7 @@ var selfTests = new Dictionary<string, Func<Task<int>>>(StringComparer.OrdinalIg
     ["exfil-domains-selftest"] = () => Task.FromResult(RunExfilDomainsSelfTest()),
     ["account-read-selftest"] = () => Task.FromResult(RunAccountReadSelfTest()),
     ["session-scan-selftest"] = () => Task.FromResult(RunSessionScanSelfTest()),
+    ["blocked-flows-selftest"] = () => Task.FromResult(RunBlockedFlowsSelfTest()),
 };
 const string AllSelfTestsScenario = "selftest-all";
 
@@ -835,6 +836,48 @@ static int RunAccountReadSelfTest()
 
 // Roubo de sessão do Minecraft em mod: leitura do token + canal de envio no mesmo jar
 // viram achado; cada um sozinho (gerenciador de contas, upload de crash report) não.
+// Regressão do vazamento de 2026-11-09: ClientHello bloqueado, mas a retransmissão do 1º
+// segmento ficava no reassembler, expirava e era liberada (fail-open), e o resto do fluxo
+// passava — conexão completa com um só "Bloqueado" no log. Agora o fluxo bloqueado é
+// descartado inteiro antes do parser; e o RST injetado confia que SeqNum/AckNum do
+// WindivertDotnet já vêm em ordem de host (senão o ACK do RST sai errado).
+static int RunBlockedFlowsSelfTest()
+{
+    var t0 = new DateTime(2026, 11, 9, 12, 0, 0, DateTimeKind.Utc);
+    var flow = new TcpFlowKey(IPAddress.Parse("10.0.0.1"), 51000, IPAddress.Parse("162.159.137.232"), 443);
+    var sibling = flow with { SrcPort = 51001 };
+
+    var blocked = new BlockedFlows<TcpFlowKey>(TimeSpan.FromSeconds(30));
+    Assert(!blocked.IsBlocked(flow, t0), "fluxo novo não deveria estar bloqueado");
+    blocked.Add(flow, t0);
+
+    // Retransmissão (~0,3s), 2º segmento após o servidor confirmar, FIN tardio (~21s):
+    // tudo do mesmo 5-tuple cai.
+    foreach (var dt in new[] { 0.3, 1.0, 21.0, 29.9 })
+        Assert(blocked.IsBlocked(flow, t0.AddSeconds(dt)), $"fluxo bloqueado vazou em t+{dt}s");
+    Assert(!blocked.IsBlocked(sibling, t0.AddSeconds(1)), "outra porta local (outra conexão) não pode herdar o bloqueio");
+
+    Assert(!blocked.IsBlocked(flow, t0.AddSeconds(31)), "bloqueio deveria expirar depois do TTL");
+    Assert(blocked.Count == 0, $"entrada expirada deveria ter sido varrida, sobrou {blocked.Count}");
+
+    var udp = new BlockedFlows<UdpFlowKey>(TimeSpan.FromSeconds(30));
+    var quic = new UdpFlowKey(IPAddress.Parse("10.0.0.1"), 52000, IPAddress.Parse("162.159.137.232"), 443);
+    udp.Add(quic, t0);
+    Assert(udp.IsBlocked(quic, t0.AddSeconds(2)), "Initial QUIC retransmitido de fluxo bloqueado deveria cair");
+
+    // Ordem de bytes: seq/ack no fio são big-endian.
+    var header = new byte[20];
+    header[4] = 0x00; header[5] = 0x00; header[6] = 0x01; header[7] = 0x02; // seq = 0x0102
+    var tcp = System.Runtime.InteropServices.MemoryMarshal.Read<TcpHeader>(header);
+    Assert(tcp.SeqNum == 0x0102u, $"TcpHeader.SeqNum deveria vir em ordem de host (0x102), veio 0x{tcp.SeqNum:X}");
+    ref var writable = ref System.Runtime.InteropServices.MemoryMarshal.AsRef<TcpHeader>(header.AsSpan());
+    writable.AckNum = 0x0A0B0C0Du;
+    Assert(header[8] == 0x0A && header[11] == 0x0D, "TcpHeader.AckNum deveria ser gravado big-endian no pacote");
+
+    Console.WriteLine("PASS — fluxo bloqueado: retransmissão/continuação/FIN do mesmo 5-tuple descartados por 30s, outras conexões livres, TCP e QUIC; seq/ack em ordem de host pro RST.");
+    return 0;
+}
+
 static int RunSessionScanSelfTest()
 {
     const string cp = "\u0001\u0000 "; // cabeçalho de string do constant pool (tamanho imprimível)
