@@ -6,105 +6,47 @@ using AntiGrabber.Shared;
 using WindivertDotnet;
 
 const string SyntheticPayload = "TEST_PAYLOAD_NAO_E_TOKEN_REAL|";
-const string TlsParserSelfTestScenario = "tls-parser-selftest";
-const string ReassemblySelfTestScenario = "tls-reassembly-selftest";
-const string QuicCryptoSelfTestScenario = "quic-crypto-selftest";
-const string QuicHeaderSelfTestScenario = "quic-header-selftest";
-const string QuicWiringSelfTestScenario = "quic-wiring-selftest";
-const string JarScanSelfTestScenario = "jar-scan-selftest";
-
 var scenarios = new Dictionary<string, ScenarioDefinition>(StringComparer.OrdinalIgnoreCase)
 {
     ["discord-webhook"] = new("discord", "Discord", DefaultTargetUrl: null),
     ["steam-exfil"] = new("steam", "Steam", DefaultTargetUrl: "https://steamcommunity.com/"),
 };
 
+// Self-tests offline: sem rede, sem WinDivert, sem admin. Toda proteção nova entra
+// aqui com um teste — selftest-all roda todos e é o que o CI do release executa.
+var selfTests = new Dictionary<string, Func<Task<int>>>(StringComparer.OrdinalIgnoreCase)
+{
+    ["tls-parser-selftest"] = () => Task.FromResult(RunTlsParserSelfTest()),
+    ["tls-reassembly-selftest"] = RunReassemblySelfTestAsync,
+    ["quic-crypto-selftest"] = () => Task.FromResult(RunQuicCryptoSelfTest()),
+    ["quic-header-selftest"] = () => Task.FromResult(RunQuicHeaderSelfTest()),
+    ["quic-wiring-selftest"] = RunQuicWiringSelfTestAsync,
+    ["jar-scan-selftest"] = () => Task.FromResult(RunJarScanSelfTest()),
+};
+const string AllSelfTestsScenario = "selftest-all";
+
 var options = ParseArgs(args);
 if (!options.TestMode)
 {
     Console.Error.WriteLine("Recusado: TestHarness só roda com --test-mode.");
     Console.Error.WriteLine("Uso: AntiGrabber.TestHarness --test-mode --scenario=<cenario> [--webhook-url=<url-de-teste>]");
-    Console.Error.WriteLine($"Cenários disponíveis: {string.Join(", ", scenarios.Keys)}, {TlsParserSelfTestScenario}, {ReassemblySelfTestScenario}, {QuicCryptoSelfTestScenario}, {QuicHeaderSelfTestScenario}, {QuicWiringSelfTestScenario}, {JarScanSelfTestScenario} (sem rede)");
+    Console.Error.WriteLine($"Cenários disponíveis: {string.Join(", ", scenarios.Keys)}, {AllSelfTestsScenario}, {string.Join(", ", selfTests.Keys)} (sem rede)");
     return 2;
 }
 
-if (string.Equals(options.Scenario, TlsParserSelfTestScenario, StringComparison.OrdinalIgnoreCase))
+if (string.Equals(options.Scenario, AllSelfTestsScenario, StringComparison.OrdinalIgnoreCase))
 {
-    try
-    {
-        return RunTlsParserSelfTest();
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine(ex.Message);
-        return 1;
-    }
+    var failed = 0;
+    foreach (var (name, run) in selfTests)
+        if (await RunSelfTestAsync(name, run) != 0) failed++;
+    Console.WriteLine(failed == 0
+        ? $"PASS — {selfTests.Count}/{selfTests.Count} self-tests ok."
+        : $"FAIL — {failed}/{selfTests.Count} self-tests falharam.");
+    return failed == 0 ? 0 : 1;
 }
 
-if (string.Equals(options.Scenario, ReassemblySelfTestScenario, StringComparison.OrdinalIgnoreCase))
-{
-    try
-    {
-        return await RunReassemblySelfTestAsync();
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine(ex.Message);
-        return 1;
-    }
-}
-
-if (string.Equals(options.Scenario, QuicCryptoSelfTestScenario, StringComparison.OrdinalIgnoreCase))
-{
-    try
-    {
-        return RunQuicCryptoSelfTest();
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine(ex.Message);
-        return 1;
-    }
-}
-
-if (string.Equals(options.Scenario, JarScanSelfTestScenario, StringComparison.OrdinalIgnoreCase))
-{
-    try
-    {
-        return RunJarScanSelfTest();
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine(ex.Message);
-        return 1;
-    }
-}
-
-if (string.Equals(options.Scenario, QuicHeaderSelfTestScenario, StringComparison.OrdinalIgnoreCase))
-{
-    try
-    {
-        return RunQuicHeaderSelfTest();
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine(ex.Message);
-        return 1;
-    }
-}
-
-if (string.Equals(options.Scenario, QuicWiringSelfTestScenario, StringComparison.OrdinalIgnoreCase))
-{
-    try
-    {
-        return await RunQuicWiringSelfTestAsync();
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine(ex.Message);
-        return 1;
-    }
-}
+if (selfTests.TryGetValue(options.Scenario, out var selfTest))
+    return await RunSelfTestAsync(options.Scenario, selfTest);
 
 if (!scenarios.TryGetValue(options.Scenario, out var scenario))
 {
@@ -185,6 +127,19 @@ static async Task<bool> TrySendPayloadAsync(string url, string payload)
     {
         Console.WriteLine($"Conexão não completou ({ex.GetType().Name}) — indicativo de bloqueio.");
         return true;
+    }
+}
+
+static async Task<int> RunSelfTestAsync(string name, Func<Task<int>> run)
+{
+    try
+    {
+        return await run();
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[{name}] {ex.Message}");
+        return 1;
     }
 }
 
