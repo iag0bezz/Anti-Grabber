@@ -768,7 +768,7 @@ public sealed class BlockInvestigator
         }
     }
 
-    private sealed record ProcessInfo(string? ImagePath, DateTimeOffset? StartTime, int? ParentPid, string? CommandLine, string? CurrentDirectory)
+    internal sealed record ProcessInfo(string? ImagePath, DateTimeOffset? StartTime, int? ParentPid, string? CommandLine, string? CurrentDirectory)
     {
         public static ProcessInfo? TryRead(int pid)
         {
