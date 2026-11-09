@@ -34,6 +34,7 @@ var selfTests = new Dictionary<string, Func<Task<int>>>(StringComparer.OrdinalIg
     ["account-read-selftest"] = () => Task.FromResult(RunAccountReadSelfTest()),
     ["session-scan-selftest"] = () => Task.FromResult(RunSessionScanSelfTest()),
     ["blocked-flows-selftest"] = () => Task.FromResult(RunBlockedFlowsSelfTest()),
+    ["mod-guard-selftest"] = RunModGuardSelfTestAsync,
 };
 const string AllSelfTestsScenario = "selftest-all";
 
@@ -889,6 +890,66 @@ static int RunBlockedFlowsSelfTest()
     Assert(header[8] == 0x0A && header[11] == 0x0D, "TcpHeader.AckNum deveria ser gravado big-endian no pacote");
 
     Console.WriteLine("PASS — fluxo bloqueado: retransmissão/continuação/FIN do mesmo 5-tuple descartados por 30s, outras conexões livres, TCP e QUIC; espera do ETW retém e solta; isenção Mojang só com fronteira de rótulo; seq/ack em ordem de host pro RST.");
+    return 0;
+}
+
+// Scan proativo de mods: mod que rouba a sessão recebe o token pela memória do jogo (não
+// lê arquivo de conta), então precisa ser pego na pasta, antes de qualquer conexão.
+static async Task<int> RunModGuardSelfTestAsync()
+{
+    const string cp = "  ";
+    var stealer = BuildJar(
+        ("fabric.mod.json", "{\"id\":\"fpsboost\",\"name\":\"FPS Boost\",\"version\":\"1.0\"}"),
+        ("a/Grab.class", cp + "net/minecraft/class_320" + cp + "method_1674" + cp + "Code"),
+        ("b/Send.class", cp + "http://45.12.33.9:8080/upload" + cp));
+    var clean = BuildJar(("fabric.mod.json", "{\"id\":\"sodium\",\"name\":\"Sodium\",\"version\":\"0.5\"}"), ("s/R.class", cp + "net/minecraft/class_310" + cp));
+
+    var root = Directory.CreateTempSubdirectory("ag-mods-").FullName;
+    try
+    {
+        var modsA = Directory.CreateDirectory(Path.Combine(root, "instA", "minecraft", "mods")).FullName;
+        var modsB = Directory.CreateDirectory(Path.Combine(root, "instB", ".minecraft", "mods")).FullName;
+        Directory.CreateDirectory(Path.Combine(root, "instA", "minecraft", "assets", "mods")); // não é pasta de mods do jogo
+        var bad = Path.Combine(modsA, "fpsboost.jar");
+        File.WriteAllBytes(bad, stealer);
+        File.WriteAllBytes(Path.Combine(modsA, "sodium.jar"), clean);
+        File.WriteAllBytes(Path.Combine(modsB, "sodium.jar"), clean);
+
+        var dirs = ModGuard.FindModsDirs(root, 3).ToList();
+        Assert(dirs.Count == 2 && dirs.Contains(modsA, StringComparer.OrdinalIgnoreCase) && dirs.Contains(modsB, StringComparer.OrdinalIgnoreCase),
+            $"pastas de mods achadas: [{string.Join(", ", dirs)}]");
+        Assert(ModGuard.ModsDirOf(Path.Combine(modsA, "1.20", "x.jar")) is { } nested && nested.Equals(modsA, StringComparison.OrdinalIgnoreCase),
+            "jar em subpasta de mods deveria contar pra pasta mods");
+        Assert(ModGuard.ModsDirOf(Path.Combine(root, "x.jar")) is null, "jar fora de pasta mods não conta");
+
+        var guard = new ModGuard(path => BlockInvestigator.ScanFile(path).Finding);
+        Assert(!guard.AnyFlagged, "guarda nova não deveria ter nada marcado");
+        foreach (var d in dirs) await guard.EnsureScanned(d);
+
+        var flaggedA = guard.FlaggedIn([modsA]);
+        Assert(guard.AnyFlagged && flaggedA.Length == 1 && flaggedA[0].Path == bad && flaggedA[0].ModName == "FPS Boost",
+            $"stealer não marcado na pasta A: [{string.Join(", ", flaggedA.Select(f => f.Path))}]");
+        Assert(guard.FlaggedIn([modsB]).Length == 0, "instância B (limpa) não pode herdar o bloqueio da A");
+
+        // Autor troca o jar por versão limpa: desmarca. Volta a versão ruim: marca de novo.
+        File.WriteAllBytes(bad, clean);
+        guard.OnJarChanged(bad);
+        Assert(!guard.AnyFlagged, "jar substituído por versão limpa deveria ser desmarcado");
+        File.WriteAllBytes(bad, stealer);
+        guard.OnJarChanged(bad);
+        Assert(guard.FlaggedIn([modsA]).Length == 1, "jar ruim de volta deveria ser remarcado");
+
+        // Usuário apaga o mod: rede volta.
+        File.Delete(bad);
+        guard.OnJarRemoved(bad);
+        Assert(!guard.AnyFlagged && guard.FlaggedIn([modsA]).Length == 0, "mod removido deveria liberar a pasta");
+    }
+    finally
+    {
+        try { Directory.Delete(root, recursive: true); } catch { }
+    }
+
+    Console.WriteLine("PASS — mod guard: stealer marcado na pasta certa antes de conectar, outra instância livre, pastas de assets ignoradas, troca por versão limpa desmarca, remoção libera.");
     return 0;
 }
 

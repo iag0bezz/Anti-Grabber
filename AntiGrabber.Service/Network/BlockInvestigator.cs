@@ -558,6 +558,19 @@ public sealed class BlockInvestigator
 
     public sealed record FileScan(FileFindingPayload? Finding, ModMetadata? Mod);
 
+    /// Pastas de mods que esse javaw carrega (--gameDir / instância Prism), as que existem.
+    public static IReadOnlyList<string> ModDirsOf(int pid, string processName)
+    {
+        if (ProcessInfo.TryRead(pid) is not { CommandLine: not null } info) return Array.Empty<string>();
+        return ResolveTargets(info, processName).Targets.Paths
+            .Where(p => Path.GetFileName(p.TrimEnd('\\', '/')).Equals("mods", StringComparison.OrdinalIgnoreCase) && Directory.Exists(p))
+            .Select(p => Path.GetFullPath(p).TrimEnd('\\'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    public FileScan ScanCached(string path) => ScanFileCached(path);
+
     private FileScan ScanFileCached(string path)
     {
         var info = new FileInfo(path);

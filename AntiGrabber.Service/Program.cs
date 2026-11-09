@@ -30,6 +30,7 @@ builder.Services.AddSingleton<MonitoredAppsState>();
 builder.Services.AddSingleton<BlockStatsTracker>();
 builder.Services.AddSingleton<ProcessNameCache>();
 builder.Services.AddSingleton<BlockInvestigator>();
+builder.Services.AddSingleton<ModGuard>();
 builder.Services.AddSingleton<RuleRevalidationSignal>();
 builder.Services.AddSingleton<IpcServer>();
 builder.Services.Configure<RuleUpdateOptions>(builder.Configuration.GetSection("RuleUpdate"));
@@ -38,6 +39,7 @@ builder.Services.Configure<NetworkFilterOptions>(builder.Configuration.GetSectio
 builder.Services.AddHostedService<StartupChecks>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IpcServer>());
 builder.Services.AddHostedService<NetworkFilterWorker>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ModGuard>());
 builder.Services.AddHostedService<TokenFileWatcher>();
 builder.Services.AddHostedService<RuleUpdateService>();
 

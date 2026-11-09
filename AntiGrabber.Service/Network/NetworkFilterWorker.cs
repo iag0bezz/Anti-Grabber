@@ -17,6 +17,7 @@ public sealed class NetworkFilterWorker : BackgroundService
     private readonly BlockStatsTracker _blockStats;
     private readonly ProcessNameCache _processNameCache;
     private readonly BlockInvestigator _blockInvestigator;
+    private readonly ModGuard _modGuard;
     private readonly NetworkFilterOptions _options;
     private readonly ClientHelloReassembler _reassembler = new();
     private readonly QuicClientHelloReassembler _quicReassembler = new();
@@ -38,6 +39,7 @@ public sealed class NetworkFilterWorker : BackgroundService
         BlockStatsTracker blockStats,
         ProcessNameCache processNameCache,
         BlockInvestigator blockInvestigator,
+        ModGuard modGuard,
         IOptions<NetworkFilterOptions> options)
     {
         _logger = logger;
@@ -47,6 +49,7 @@ public sealed class NetworkFilterWorker : BackgroundService
         _blockStats = blockStats;
         _processNameCache = processNameCache;
         _blockInvestigator = blockInvestigator;
+        _modGuard = modGuard;
         _options = options.Value;
     }
 
@@ -328,14 +331,21 @@ public sealed class NetworkFilterWorker : BackgroundService
     private bool TryHoldForEtw(WinDivert divert, TcpFlowKey key, string sni, ushort localPort, AddressFamily family,
         WinDivertPacket current, WinDivertAddress currentAddress, CancellationToken ct)
     {
-        if (!TokenFileWatcher.EtwActive || IsMinecraftAuthDomain(sni) || _whitelist.IsSensitiveDomain(sni)) return false;
+        if (IsMinecraftAuthDomain(sni) || _whitelist.IsSensitiveDomain(sni)) return false;
 
         var pid = TcpProcessResolver.ResolvePidByLocalPort(localPort, family);
         if (pid is null || _correlationTracker.TryGetRecentAccountRead(pid.Value) is not null) return false;
         if (TryGetProcessName(pid) is not { } processName || !DomainWhitelistStore.IsCodeHost(processName)) return false;
 
+        // Java espera o scan das pastas de mods dele (também dispara o scan já); sem ETW
+        // de pé (subindo/falhou), só esse motivo segura a conexão.
+        var isJava = Path.GetFileNameWithoutExtension(processName).StartsWith("java", StringComparison.OrdinalIgnoreCase);
+        var etw = TokenFileWatcher.EtwActive;
+        if (!etw && !(isJava && _modGuard.ScanPendingFor(pid.Value, processName))) return false;
+
         var holdStartUtc = DateTime.UtcNow;
         _heldTcp.Add(key, holdStartUtc);
+        if (isJava) _ = _modGuard.ScanPendingFor(pid.Value, processName); // dispara o scan já
         var packet = current.Clone();
         var address = currentAddress.Clone();
 
@@ -343,11 +353,13 @@ public sealed class NetworkFilterWorker : BackgroundService
         {
             try
             {
-                // Espera o ETW passar do instante da conexão: aí qualquer leitura de conta
-                // feita antes dela já está no CorrelationTracker.
+                // Espera o ETW passar do instante da conexão (aí qualquer leitura de conta
+                // feita antes dela já está no CorrelationTracker) e, pra java, o scan das
+                // pastas de mods do processo.
                 var deadline = holdStartUtc + EtwMaxGrace;
                 var nextFlush = DateTime.MinValue;
-                while (TokenFileWatcher.EtwWatermarkUtc < holdStartUtc && DateTime.UtcNow < deadline)
+                while (((isJava && _modGuard.ScanPendingFor(pid.Value, processName)) || (etw && TokenFileWatcher.EtwWatermarkUtc < holdStartUtc))
+                       && DateTime.UtcNow < deadline)
                 {
                     if (DateTime.UtcNow >= nextFlush)
                     {
@@ -400,7 +412,7 @@ public sealed class NetworkFilterWorker : BackgroundService
     private async Task<bool> DecideAsync(string sni, ushort localPort, AddressFamily family, bool isUdp, CancellationToken ct)
     {
         var sensitive = _whitelist.IsSensitiveDomain(sni);
-        if (!sensitive && !_correlationTracker.AnyRecentAccountRead) return true;
+        if (!sensitive && !_correlationTracker.AnyRecentAccountRead && !_modGuard.AnyFlagged) return true;
 
         var pid = isUdp
             ? UdpProcessResolver.ResolvePidByLocalPort(localPort, family)
@@ -416,15 +428,24 @@ public sealed class NetworkFilterWorker : BackgroundService
         // fala com NINGUÉM na janela — stealer manda pra servidor próprio, não só pros
         // domínios sensíveis — e nenhuma liberação vale por cima disso.
         var accountRead = pid is not null ? _correlationTracker.TryGetRecentAccountRead(pid.Value) : null;
-        if (accountRead is null && !sensitive) return true;
 
-        if (accountRead is null && processName is not null && _whitelist.IsAllowed(sni, processName))
+        // Jogo com mod suspeito na pasta (ModGuard): sem rede fora Mojang/Microsoft, e
+        // nenhuma liberação vale por cima — o mod já tem o token na memória.
+        var badMods = pid is not null && processName is not null && _modGuard.AnyFlagged
+            && Path.GetFileNameWithoutExtension(processName).StartsWith("java", StringComparison.OrdinalIgnoreCase)
+            && !IsMinecraftAuthDomain(sni)
+                ? _modGuard.FlaggedFor(pid.Value, processName)
+                : [];
+        var clean = accountRead is null && badMods.Length == 0;
+        if (clean && !sensitive) return true;
+
+        if (clean && processName is not null && _whitelist.IsAllowed(sni, processName))
             return true;
 
         // Host de código (javaw, python...) liberado pelo usuário pra ESTE conjunto de
         // mods/scripts. Nunca vale se o processo acabou de ler arquivo sensível ou se a
         // investigação achou indicador de stealer.
-        if (accountRead is null && processName is not null && pid is not null
+        if (clean && processName is not null && pid is not null
             && DomainWhitelistStore.IsCodeHost(processName)
             && _whitelist.HasFingerprintRule(sni, processName)
             && !_correlationTracker.HasRecentFileAccess(pid.Value)
@@ -445,7 +466,7 @@ public sealed class NetworkFilterWorker : BackgroundService
         }
 
         var correlatedFileAccess = accountRead is not null || (pid is not null && _correlationTracker.HasRecentFileAccess(pid.Value));
-        var correlatedFilePath = accountRead?.Path ?? (pid is not null ? _correlationTracker.TryGetRecentFilePath(pid.Value) : null);
+        var correlatedFilePath = accountRead?.Path ?? badMods.FirstOrDefault()?.Path ?? (pid is not null ? _correlationTracker.TryGetRecentFilePath(pid.Value) : null);
         _blockStats.RecordBlock();
 
         _logger.LogWarning(
@@ -469,7 +490,9 @@ public sealed class NetworkFilterWorker : BackgroundService
                 CorrelatedFilePath = correlatedFilePath,
                 Protocol = isUdp ? "QUIC" : "TCP",
                 Investigation = pid is not null ? _blockInvestigator.TryGetCached(pid.Value) : null,
-                PlainLanguageMessage = accountRead is { } read
+                PlainLanguageMessage = badMods.Length > 0
+                    ? $"Bloqueamos um mod suspeito: {badMods[0].ModName ?? Path.GetFileName(badMods[0].Path)} tentou enviar dados para {sni}. Ele pode roubar sua conta do Minecraft — remova o arquivo: {badMods[0].Path}"
+                    : accountRead is { } read
                     ? $"Bloqueamos um possível roubo de conta: {processName ?? "um programa"} leu seus dados de login do {read.App} e tentou enviar para {sni}."
                     : correlatedFileAccess
                     ?$"Bloqueamos uma tentativa de roubo: {processName ?? "um programa"} tentou enviar dados para {sni} logo após acessar seus arquivos."
