@@ -5,3 +5,7 @@ dist/
 .vs/
 *.suo
 tray-ui/node_modules/
+
+# tester (QA) — jar compilado e saida intermediaria
+tester/java/exfil-test.jar
+tester/java/out/
