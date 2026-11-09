@@ -31,28 +31,54 @@ public sealed class TokenFileWatcher : BackgroundService
         _correlationTracker = correlationTracker;
     }
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    private volatile IReadOnlyList<WatchedPath> _watched = Array.Empty<WatchedPath>();
+
+    /// A sessão ETW sobe em segundos com os dados que já existem nos perfis; a detecção
+    /// completa (varre disco atrás de executáveis — passava de 1 minuto, e nesse tempo
+    /// nenhuma leitura de conta era vista) roda em paralelo e só soma caminhos, como os
+    /// de launcher portátil (MultiMC/ATLauncher) que dependem da pasta do executável.
+    /// Tudo fora da thread de startup do host, pra não atrasar os outros serviços.
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) => Task.Run(() =>
     {
         var volumes = DosToNtVolumes();
-        var watched = new UnifiedAppLocator().DetectAll()
-            .SelectMany(install => install.SensitiveDirectories.Select(path => (install, path)))
-            .Select(x => new WatchedPath(ToNtPath(x.path, volumes) ?? x.path, SensitiveAppCatalog.Apps.Single(a => a.AppId == x.install.AppId)))
-            .ToList();
-
+        var profiles = UnifiedAppLocator.UserProfileDirectories();
+        _watched = ToWatched(SensitiveAppCatalog.Apps.SelectMany(app =>
+            UnifiedAppLocator.ResolveSensitiveDirectories(app, profiles).Select(path => (app, path))), volumes);
         _logger.LogInformation(
             "TokenFileWatcher observando {Count} caminhos sensíveis ({Accounts} de conta) via ETW.",
-            watched.Count, watched.Count(w => w.App.AccountData));
-        if (watched.Count == 0) return Task.CompletedTask;
+            _watched.Count, _watched.Count(w => w.App.AccountData));
 
-        return Task.Run(() => RunSession(watched, volumes, stoppingToken), stoppingToken);
-    }
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var full = ToWatched(new UnifiedAppLocator().DetectAll().SelectMany(install =>
+                    install.SensitiveDirectories.Select(path => (SensitiveAppCatalog.Apps.Single(a => a.AppId == install.AppId), path))), volumes);
+                var merged = _watched.Concat(full).DistinctBy(w => w.Path, StringComparer.OrdinalIgnoreCase).ToList();
+                if (merged.Count > _watched.Count)
+                    _logger.LogInformation("TokenFileWatcher: detecção completa somou {Extra} caminho(s).", merged.Count - _watched.Count);
+                _watched = merged;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Detecção completa de apps falhou — seguindo com os caminhos dos perfis.");
+            }
+        }, stoppingToken);
 
-    private void RunSession(IReadOnlyList<WatchedPath> watched, IReadOnlyDictionary<string, string> volumes, CancellationToken ct)
+        RunSession(volumes, stoppingToken);
+    }, stoppingToken);
+
+    private static List<WatchedPath> ToWatched(IEnumerable<(SensitiveAppDefinition App, string Path)> entries, IReadOnlyDictionary<string, string> volumes) =>
+        entries.Select(x => new WatchedPath(ToNtPath(x.Path, volumes) ?? x.Path, x.App))
+            .DistinctBy(w => w.Path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private void RunSession(IReadOnlyDictionary<string, string> volumes, CancellationToken ct)
     {
         try
         {
             var ownPid = Environment.ProcessId;
-            RunEtw("AntiGrabber-SensitiveFiles", watched, (pid, fileName, hit) =>
+            RunEtw("AntiGrabber-SensitiveFiles", () => _watched, (pid, fileName, hit) =>
             {
                 if (pid != ownPid) OnSensitiveOpen(pid, ToDosPath(fileName, volumes), hit.App);
             }, ct);
@@ -64,7 +90,11 @@ public sealed class TokenFileWatcher : BackgroundService
     }
 
     /// Bloqueia até ct cancelar. Precisa de admin. Público pro cenário etw-smoke do TestHarness.
-    public static void RunEtw(string sessionName, IReadOnlyList<WatchedPath> watched, Action<int, string, WatchedPath> onOpen, CancellationToken ct)
+    public static void RunEtw(string sessionName, IReadOnlyList<WatchedPath> watched, Action<int, string, WatchedPath> onOpen, CancellationToken ct) =>
+        RunEtw(sessionName, () => watched, onOpen, ct);
+
+    /// watched é lido a cada evento: a lista pode crescer com a sessão já rodando.
+    public static void RunEtw(string sessionName, Func<IReadOnlyList<WatchedPath>> watched, Action<int, string, WatchedPath> onOpen, CancellationToken ct)
     {
         using var session = new TraceEventSession(sessionName);
         using var stop = ct.Register(() => session.Dispose());
@@ -79,7 +109,7 @@ public sealed class TokenFileWatcher : BackgroundService
             Interlocked.Exchange(ref _watermarkUtcTicks, e.TimeStamp.ToUniversalTime().Ticks);
             if ((int)e.ID != CreateEventId || e.ProcessID <= 4) return;
             if (e.PayloadByName("FileName") is not string fileName) return;
-            if (Match(fileName, watched) is { } hit) onOpen(e.ProcessID, fileName, hit);
+            if (Match(fileName, watched()) is { } hit) onOpen(e.ProcessID, fileName, hit);
         };
 
         // Entrega em tempo real tem ~1s de buffer do ETW; stealer que lê e manda no mesmo

@@ -5,7 +5,9 @@ namespace AntiGrabber.Shared;
 
 public sealed class UnifiedAppLocator
 {
-    public IReadOnlyList<AppInstallInfo> DetectAll()
+    /// deepScan=false pula a varredura de disco (DetectByDiskScan, que passa de 1 minuto
+    /// procurando launcher que nem está instalado) — pra startup não ficar esperando.
+    public IReadOnlyList<AppInstallInfo> DetectAll(bool deepScan = true)
     {
         var results = new Dictionary<string, AppInstallInfo>();
 
@@ -15,7 +17,7 @@ public sealed class UnifiedAppLocator
                 ?? DetectByRegistry(app)
                 ?? DetectByShortcut(app)
                 ?? DetectByAppDataDefaultPath(app)
-                ?? DetectByDiskScan(app);
+                ?? (deepScan ? DetectByDiskScan(app) : null);
 
             if (found is not null) results[app.AppId] = found;
         }
