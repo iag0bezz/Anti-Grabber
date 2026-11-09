@@ -22,6 +22,7 @@ var selfTests = new Dictionary<string, Func<Task<int>>>(StringComparer.OrdinalIg
     ["quic-header-selftest"] = () => Task.FromResult(RunQuicHeaderSelfTest()),
     ["quic-wiring-selftest"] = RunQuicWiringSelfTestAsync,
     ["jar-scan-selftest"] = () => Task.FromResult(RunJarScanSelfTest()),
+    ["user-profiles-selftest"] = () => Task.FromResult(RunUserProfilesSelfTest()),
 };
 const string AllSelfTestsScenario = "selftest-all";
 
@@ -613,6 +614,59 @@ static int RunJarScanSelfTest()
     }
 
     Console.WriteLine("PASS — BlockInvestigator: webhook exato (claro/base64/-EncodedCommand), origem jar-in-jar, metadados do mod, sem falso positivo, alvos sem vazar token, mod achado pelo log (Fabric/Forge), impressão digital e liberação por conjunto de mods.");
+    return 0;
+}
+
+// O serviço roda como LocalSystem: AppData "dele" é o systemprofile. Os diretórios
+// sensíveis têm que sair dos perfis reais de cada usuário, numa pasta temporária aqui.
+static int RunUserProfilesSelfTest()
+{
+    var root = Directory.CreateTempSubdirectory("ag-profiles-").FullName;
+    try
+    {
+        string Make(params string[] parts)
+        {
+            var path = Path.Combine(new[] { root }.Concat(parts).ToArray());
+            Directory.CreateDirectory(path);
+            return path;
+        }
+
+        var alice = Make("alice");
+        var bob = Make("bob");
+        var carol = Make("carol");
+        Make("alice", "AppData", "Local", "Discord", "app-1.0.9");           // instalação, sem dados
+        Make("alice", "AppData", "Roaming", "Discord", "Local Storage", "leveldb");
+        Make("bob", "AppData", "Roaming", "Discord", "Local Storage", "leveldb");
+        Make("carol", "AppData", "Local", "Discord");                         // só a instalação
+
+        var discord = SensitiveAppCatalog.Apps.Single(a => a.AppId == "discord");
+        var dirs = UnifiedAppLocator.ResolveSensitiveDirectories(discord, new[] { alice, bob, carol });
+        Assert(dirs.Count == 2, $"esperava 1 diretório por perfil com dados (2), veio [{string.Join(", ", dirs)}]");
+        Assert(dirs.Contains(Path.Combine(alice, "AppData", "Roaming", "Discord", "Local Storage", "leveldb"), StringComparer.OrdinalIgnoreCase),
+            "Roaming de alice não escolhido (Local tem pasta de mesmo nome mas sem dados)");
+        Assert(dirs.Any(d => d.StartsWith(bob, StringComparison.OrdinalIgnoreCase)), "perfil de bob ignorado");
+        Assert(!dirs.Any(d => d.StartsWith(carol, StringComparison.OrdinalIgnoreCase)), "perfil sem dados virou alvo");
+
+        // Curinga (ssfn*) só conta se existir arquivo que bata.
+        var steamLike = new SensitiveAppDefinition("t", "T", Array.Empty<string>(), Array.Empty<string>(),
+            new[] { "TApp" }, new[] { "ssfn*" }, Array.Empty<string>());
+        Assert(UnifiedAppLocator.ResolveSensitiveDirectories(steamLike, new[] { alice }).Count == 0, "curinga sem arquivo virou alvo");
+        File.WriteAllText(Path.Combine(Make("alice", "AppData", "Roaming", "TApp"), "ssfn123"), "");
+        Assert(UnifiedAppLocator.ResolveSensitiveDirectories(steamLike, new[] { alice }).Count == 1, "curinga com arquivo não achado");
+
+        // Pasta direto na raiz do perfil (ex: .lunarclient).
+        var rootLike = new SensitiveAppDefinition("r", "R", Array.Empty<string>(), Array.Empty<string>(),
+            new[] { ".rootapp" }, new[] { "accounts.json" }, Array.Empty<string>());
+        File.WriteAllText(Path.Combine(Make("bob", ".rootapp"), "accounts.json"), "{}");
+        Assert(UnifiedAppLocator.ResolveSensitiveDirectories(rootLike, new[] { bob }).SequenceEqual(new[] { Path.Combine(bob, ".rootapp", "accounts.json") }),
+            "pasta na raiz do perfil não achada");
+    }
+    finally
+    {
+        Directory.Delete(root, recursive: true);
+    }
+
+    Console.WriteLine("PASS — perfis de usuário: dados em cada perfil real, Roaming vs Local, perfil sem dados ignorado, curinga e raiz do perfil.");
     return 0;
 }
 
